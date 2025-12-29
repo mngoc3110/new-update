@@ -42,7 +42,16 @@ class Trainer:
         context = torch.enable_grad() if is_train else torch.no_grad()
         
         with context:
-            for i, (images_face, images_body, target) in enumerate(loader):
+            for i, batch_data in enumerate(loader):
+                # Handle empty batches (e.g., due to filtering corrupted data)
+                if batch_data is None:
+                    continue
+                if isinstance(batch_data, torch.Tensor) and batch_data.numel() == 0:
+                     continue
+                
+                # Unpack valid batch
+                images_face, images_body, target = batch_data
+
                 images_face = images_face.to(self.device)
                 images_body = images_body.to(self.device)
                 target = target.to(self.device)

@@ -71,14 +71,14 @@ def build_dataloaders(args: argparse.Namespace) -> Tuple[torch.utils.data.DataLo
     test_annotation_file_path = os.path.join(args.root_dir, args.test_annotation)
     
     print("Loading train data...")
-    train_data = train_data_loader(
+    train_data, train_collate_fn = train_data_loader(
         list_file=train_annotation_file_path, num_segments=args.num_segments,
         duration=args.duration, image_size=args.image_size,dataset_name=args.dataset,
         bounding_box_face=args.bounding_box_face,bounding_box_body=args.bounding_box_body
     )
     
     print("Loading test data...")
-    test_data = test_data_loader(
+    test_data, test_collate_fn = test_data_loader(
         list_file=test_annotation_file_path, num_segments=args.num_segments,
         duration=args.duration, image_size=args.image_size,
         bounding_box_face=args.bounding_box_face,bounding_box_body=args.bounding_box_body
@@ -87,11 +87,13 @@ def build_dataloaders(args: argparse.Namespace) -> Tuple[torch.utils.data.DataLo
     print("Creating DataLoader instances...")
     train_loader = torch.utils.data.DataLoader(
         train_data, batch_size=args.batch_size, shuffle=True,
-        num_workers=args.workers, pin_memory=True, drop_last=True
+        num_workers=args.workers, pin_memory=True, drop_last=True,
+        collate_fn=train_collate_fn
     )
     val_loader = torch.utils.data.DataLoader(
         test_data, batch_size=args.batch_size, shuffle=False,
-        num_workers=args.workers, pin_memory=True
+        num_workers=args.workers, pin_memory=True,
+        collate_fn=test_collate_fn
     )
     
     return train_loader, val_loader
