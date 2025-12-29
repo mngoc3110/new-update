@@ -74,14 +74,16 @@ def build_dataloaders(args: argparse.Namespace) -> Tuple[torch.utils.data.DataLo
     train_data, train_collate_fn = train_data_loader(
         list_file=train_annotation_file_path, num_segments=args.num_segments,
         duration=args.duration, image_size=args.image_size,dataset_name=args.dataset,
-        bounding_box_face=args.bounding_box_face,bounding_box_body=args.bounding_box_body
+        bounding_box_face=args.bounding_box_face,bounding_box_body=args.bounding_box_body,
+        root_dir=args.root_dir
     )
     
     print("Loading test data...")
     test_data, test_collate_fn = test_data_loader(
         list_file=test_annotation_file_path, num_segments=args.num_segments,
         duration=args.duration, image_size=args.image_size,
-        bounding_box_face=args.bounding_box_face,bounding_box_body=args.bounding_box_body
+        bounding_box_face=args.bounding_box_face,bounding_box_body=args.bounding_box_body,
+        root_dir=args.root_dir
     )
 
     print("Creating DataLoader instances...")

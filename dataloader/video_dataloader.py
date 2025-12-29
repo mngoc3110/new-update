@@ -30,7 +30,7 @@ class VideoRecord(object):
         return int(self._data[2])
 
 class VideoDataset(data.Dataset):
-    def __init__(self, list_file, num_segments, duration, mode, transform, image_size,bounding_box_face,bounding_box_body):
+    def __init__(self, list_file, num_segments, duration, mode, transform, image_size, bounding_box_face, bounding_box_body, root_dir):
         self.list_file = list_file
         self.duration = duration
         self.num_segments = num_segments
@@ -39,6 +39,7 @@ class VideoDataset(data.Dataset):
         self.mode = mode
         self.bounding_box_face = bounding_box_face
         self.bounding_box_body = bounding_box_body
+        self.root_dir = root_dir  # Store root_dir
         self._read_sample()
         self._parse_list()
         self._read_boxs()
@@ -148,12 +149,14 @@ class VideoDataset(data.Dataset):
         return self.get(record, segment_indices)
 
     def get(self, record, indices):
-        video_frames_path = glob.glob(os.path.join(record.path, '*'))
+        # Join root_dir with relative path from text file
+        full_path = os.path.join(self.root_dir, record.path)
+        video_frames_path = glob.glob(os.path.join(full_path, '*'))
         video_frames_path.sort()
         
         # --- Safety Check Added ---
         if len(video_frames_path) == 0:
-            print(f"Warning: No frames found for video {record.path}. Skipping this sample.")
+            print(f"Warning: No frames found for video {full_path}. Skipping this sample.")
             return None # Return None for the DataLoader to skip this sample
 
         num_frames_real = len(video_frames_path)
@@ -175,18 +178,41 @@ class VideoDataset(data.Dataset):
                 parent_dir = os.path.dirname(img_path)
                 file_name = os.path.basename(img_path)
 
-                if parent_dir in self.boxs:
-                    if file_name in self.boxs[parent_dir]:
-                        box = self.boxs[parent_dir][file_name]
+                # Need to use relative path components for keys in boxs json if keys are relative
+                # record.path is relative, img_path is absolute. 
+                # Let's extract relative parent dir from img_path for looking up boxes.
+                # Assuming boxes json keys match the structure in record.path
+                
+                # We can try to reconstruct relative path from full path
+                rel_img_path = os.path.relpath(img_path, self.root_dir)
+                rel_parent_dir = os.path.dirname(rel_img_path)
+
+                if rel_parent_dir in self.boxs:
+                    if file_name in self.boxs[rel_parent_dir]:
+                        box = self.boxs[rel_parent_dir][file_name]
                     else:
                         box = None
                 else:
-                    box = None
+                    # Fallback check with absolute path just in case keys are absolute (unlikely)
+                    if parent_dir in self.boxs:
+                         if file_name in self.boxs[parent_dir]:
+                             box = self.boxs[parent_dir][file_name]
+                         else:
+                             box = None
+                    else:
+                        box = None
 
                 img_pil = Image.open(img_path)
                 img_pil_face = Image.open(img_path)
-                body_box_path = parent_dir
-                body_box = self.body_boxes[body_box_path] if body_box_path in self.body_boxes else None
+                
+                # Check for body box
+                if rel_parent_dir in self.body_boxes:
+                    body_box = self.body_boxes[rel_parent_dir]
+                elif parent_dir in self.body_boxes:
+                    body_box = self.body_boxes[parent_dir]
+                else:
+                    body_box = None
+
                 if body_box is not None:
                     left, upper, right, lower = body_box
                     img_pil_body = img_pil.crop((left, upper, right, lower))
@@ -216,8 +242,13 @@ class VideoDataset(data.Dataset):
     def __len__(self):
         return len(self.video_list)
 
+def collate_fn_ignore_none(batch):
+    batch = list(filter(lambda x: x is not None, batch))
+    if len(batch) == 0:
+        return torch.tensor([]) # Return empty tensor to signal empty batch
+    return torch.utils.data.dataloader.default_collate(batch)
 
-def train_data_loader(list_file, num_segments, duration, image_size,dataset_name,bounding_box_face,bounding_box_body):
+def train_data_loader(list_file, num_segments, duration, image_size,dataset_name,bounding_box_face,bounding_box_body, root_dir):
     if dataset_name == "RAER":
          train_transforms = torchvision.transforms.Compose([
             GroupTransform(torchvision.transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05)),
@@ -235,12 +266,13 @@ def train_data_loader(list_file, num_segments, duration, image_size,dataset_name
                               transform=train_transforms,
                               image_size=image_size,
                               bounding_box_face=bounding_box_face,
-                              bounding_box_body=bounding_box_body
+                              bounding_box_body=bounding_box_body,
+                              root_dir=root_dir
                               )
-    return train_data
+    return train_data, collate_fn_ignore_none
 
 
-def test_data_loader(list_file, num_segments, duration, image_size,bounding_box_face,bounding_box_body):
+def test_data_loader(list_file, num_segments, duration, image_size,bounding_box_face,bounding_box_body, root_dir):
     
     test_transform = torchvision.transforms.Compose([GroupResize(image_size),
                                                      Stack(),
@@ -253,6 +285,7 @@ def test_data_loader(list_file, num_segments, duration, image_size,bounding_box_
                              transform=test_transform,
                              image_size=image_size,
                              bounding_box_face=bounding_box_face,
-                             bounding_box_body=bounding_box_body
+                             bounding_box_body=bounding_box_body,
+                             root_dir=root_dir
                              )
-    return test_data
+    return test_data, collate_fn_ignore_none
