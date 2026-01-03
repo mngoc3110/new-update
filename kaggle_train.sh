@@ -2,6 +2,7 @@
 set -e
 
 # --- SETUP ENVIRONMENT (Kaggle/Colab) ---
+
 echo "=> Installing dependencies..."
 pip install git+https://github.com/openai/CLIP.git
 pip install imbalanced-learn
@@ -16,7 +17,7 @@ echo "Starting Stable Training on Kaggle: ViT-B/32 + 4-Stage Strategy (100 Epoch
 # --- PATH CONFIGURATION ---
 # Adjust these paths if your Kaggle dataset structure is different
 # Root dir containing the 'RAER' folder (or where video paths start)
-ROOT_DIR="/kaggle/input/raer-video-emotion-dataset" 
+ROOT_DIR="/kaggle/input/raer-video-emotion-dataset"
 
 # Annotation paths
 ANNOT_DIR="/kaggle/input/raer-annot/annotation"
@@ -25,13 +26,13 @@ VAL_TXT="${ANNOT_DIR}/val_20.txt"
 TEST_TXT="${ANNOT_DIR}/test.txt"
 
 # Bounding Box paths (Corrected based on user input for main dataset)
-BOX_DIR="${ROOT_DIR}/RAER/bounding_box" 
+BOX_DIR="${ROOT_DIR}/RAER/bounding_box"
 FACE_BOX="${BOX_DIR}/face.json"
 BODY_BOX="${BOX_DIR}/body.json"
 
 # CLIP Model Path (Kaggle usually has internet, so ViT-B/32 works. 
 # If offline, upload the .pt file and point to it)
-CLIP_PATH="ViT-B/32" 
+CLIP_PATH="ViT-B/32"
 
 python main.py \
   --mode train \
@@ -78,7 +79,7 @@ python main.py \
   --stage1-smoothing-temp 0.15 \
   \
   --stage2-epochs 30 \
-  --stage2-logit-adjust-tau 0.4 \
+  --stage2-logit-adjust-tau 0.5 \
   --stage2-max-class-weight 2.0 \
   --stage2-smoothing-temp 0.15 \
   --stage2-label-smoothing 0.1 \
