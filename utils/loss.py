@@ -22,9 +22,37 @@ def _ramp_weight(epoch: int, warmup: int, ramp: int, max_w: float) -> float:
     return float(max_w) * t
 
 
+class FocalLoss(nn.Module):
+    def __init__(self, gamma=2.0, alpha=None, reduction='mean', label_smoothing=0.0):
+        super(FocalLoss, self).__init__()
+        self.gamma = gamma
+        self.alpha = alpha # Alpha can be class weights
+        self.reduction = reduction
+        self.label_smoothing = label_smoothing
+
+    def forward(self, inputs, targets):
+        # inputs: logits [B, C]
+        # targets: labels [B]
+        
+        # Apply label smoothing manually if needed, but Focal Loss typically works with hard labels.
+        # For simplicity and standard Focal Loss, we use hard labels here or smoothed one-hot.
+        # However, to keep it compatible with standard CE interface:
+        
+        ce_loss = F.cross_entropy(inputs, targets, reduction='none', weight=self.alpha, label_smoothing=self.label_smoothing)
+        pt = torch.exp(-ce_loss)
+        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
+
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        else:
+            return focal_loss
+
+
 class CLIPCAERLoss(nn.Module):
     """
-    L = CE + w_mi(epoch)*MI + w_dc(epoch)*DC
+    L = CE/Focal + w_mi(epoch)*MI + w_dc(epoch)*DC
     - CE: optional label smoothing OR semantic label smoothing (LDLVA-inspired)
     - MI: InfoNCE-ish using your mi_estimator(pos-neg)
     - DC: KL( P_joint || P_l ⊗ P_h ) theo paper, tính từ logits 2 view
@@ -50,21 +78,41 @@ class CLIPCAERLoss(nn.Module):
         self.semantic_smoothing = (str(getattr(args, "semantic_smoothing", "False")) == "True")
         self.smoothing_temp = float(getattr(args, "smoothing_temp", 0.1))
 
+        # Logit Adjustment (Menon et al., 2020)
+        self.logit_adjust_tau = float(getattr(args, "logit_adjust_tau", 0.0))
+        self.register_buffer("class_priors", None)
+        if hasattr(args, "class_counts") and args.class_counts is not None:
+            counts = torch.tensor(args.class_counts, dtype=torch.float32)
+            priors = counts / counts.sum()
+            self.register_buffer("class_priors", priors)
+
         # optional class weights (nếu bạn muốn dùng)
         cw = getattr(args, "class_weights", None)  # list/tuple or None
         if cw is not None:
             cw = torch.tensor(cw, dtype=torch.float32)
         self.register_buffer("class_weights", cw if cw is not None else None)
+        
+        # Focal Loss
+        self.use_focal_loss = (str(getattr(args, "use_focal_loss", "False")) == "True")
+        self.focal_gamma = float(getattr(args, "focal_gamma", 2.0))
 
         if self.semantic_smoothing and self.label_smoothing > 0.0:
             # If Semantic Smoothing is ON, we use KLDivLoss manually
             self.ce_loss = None 
         else:
-            # Standard CE (with or without uniform smoothing)
-            self.ce_loss = nn.CrossEntropyLoss(
-                weight=self.class_weights,
-                label_smoothing=self.label_smoothing,
-            )
+            if self.use_focal_loss:
+                # Use Focal Loss
+                self.ce_loss = FocalLoss(
+                    gamma=self.focal_gamma,
+                    alpha=self.class_weights,
+                    label_smoothing=self.label_smoothing
+                )
+            else:
+                # Standard CE (with or without uniform smoothing)
+                self.ce_loss = nn.CrossEntropyLoss(
+                    weight=self.class_weights,
+                    label_smoothing=self.label_smoothing,
+                )
 
         # cache weights for printing (trainer có thể đọc)
         self.last_w_mi = 0.0
@@ -201,9 +249,23 @@ class CLIPCAERLoss(nn.Module):
 
         targets = self._sanitize_targets(targets)
         
+        # --- Logit Clamping (Safety) ---
+        # Clamp logits to avoid overflow in exp() during softmax
+        logits = torch.clamp(logits, min=-30.0, max=30.0)
+        if logits_hand is not None:
+            logits_hand = torch.clamp(logits_hand, min=-30.0, max=30.0)
+        
+        # --- Logit Adjustment (Menon et al., 2020) ---
+        # Correct formula: logits = logits - tau * log(priors)
+        # Reason: log(priors) is negative. Subtracting a negative value adds to the logits of rare classes.
+        if self.logit_adjust_tau > 0.0 and self.class_priors is not None:
+             # Ensure priors are on the correct device and avoid log(0)
+             priors = self.class_priors.to(logits.device)
+             logits = logits - self.logit_adjust_tau * torch.log(priors + 1e-8)
+
         # --- Cross Entropy / Semantic Smoothing ---
         if self.ce_loss is not None:
-            # Standard Path
+            # Standard Path (CE or Focal)
             ce = self.ce_loss(logits, targets)
         else:
             # Semantic Smoothing Path

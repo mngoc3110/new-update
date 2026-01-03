@@ -1,50 +1,95 @@
 #!/bin/bash
+set -e
 
-# Kaggle Training Script for CLIP-CAER
-# Target UAR: ~70%
+# --- SETUP ENVIRONMENT (Kaggle/Colab) ---
+echo "=> Installing dependencies..."
+pip install git+https://github.com/openai/CLIP.git
+pip install imbalanced-learn
 
-# Install dependencies if running in a fresh environment
-# pip install ftfy regex tqdm
+# Experiment Name
+EXP="Kaggle_ViTB32_4Stage_100Epochs"
+OUT="outputs/${EXP}-$(date +%m-%d-%H%M)"
+mkdir -p "${OUT}"
 
-echo "Starting Kaggle Training..."
+echo "Starting Stable Training on Kaggle: ViT-B/32 + 4-Stage Strategy (100 Epochs)"
+
+# --- PATH CONFIGURATION ---
+# Adjust these paths if your Kaggle dataset structure is different
+# Root dir containing the 'RAER' folder (or where video paths start)
+ROOT_DIR="/kaggle/input/raer-video-emotion-dataset" 
+
+# Annotation paths
+ANNOT_DIR="/kaggle/input/raer-annot/annotation"
+TRAIN_TXT="${ANNOT_DIR}/train_80.txt"
+VAL_TXT="${ANNOT_DIR}/val_20.txt"
+TEST_TXT="${ANNOT_DIR}/test.txt"
+
+# Bounding Box paths (Assuming they are uploaded to a dataset, e.g., raer-annot)
+# UPDATE THIS: Where did you upload face.json?
+BOX_DIR="/kaggle/input/raer-annot/bounding_box" 
+FACE_BOX="${BOX_DIR}/face.json"
+BODY_BOX="${BOX_DIR}/body.json"
+
+# CLIP Model Path (Kaggle usually has internet, so ViT-B/32 works. 
+# If offline, upload the .pt file and point to it)
+CLIP_PATH="ViT-B/32" 
 
 python main.py \
-    --mode train \
-    --exper-name prompt_tuning_kaggle_vitb16 \
-    --gpu 0 \
-    --epochs 50 \
-    --batch-size 16 \
-    --workers 4 \
-    --lr 0.003 \
-    --lr-image-encoder 1e-6 \
-    --lr-prompt-learner 0.001 \
-    --weight-decay 0.0001 \
-    --momentum 0.9 \
-    --milestones 20 35 \
-    --gamma 0.1 \
-    --temporal-layers 1 \
-    --num-segments 16 \
-    --duration 1 \
-    --image-size 224 \
-    --seed 42 \
-    --print-freq 10 \
-    --root-dir /kaggle/input/raer-video-emotion-dataset/RAER \
-    --train-annotation RAER/annotation/train.txt \
-    --test-annotation RAER/annotation/test.txt \
-    --clip-path ViT-B/16 \
-    --bounding-box-face /kaggle/input/raer-video-emotion-dataset/RAER/RAER/bounding_box/face.json \
-    --bounding-box-body /kaggle/input/raer-video-emotion-dataset/RAER/RAER/bounding_box/body.json \
-    --text-type class_descriptor \
-    --contexts-number 8 \
-    --class-token-position end \
-    --class-specific-contexts True \
-    --load_and_tune_prompt_learner True \
-    --lambda-mi 1.0 \
-    --lambda-dc 2.0 \
-    --mi-warmup 2 \
-    --mi-ramp 5 \
-    --dc-warmup 3 \
-    --dc-ramp 5 \
-    --label-smoothing 0.2
+  --mode train \
+  --exper-name "${EXP}" \
+  --gpu 0 \
+  --seed 42 \
+  --workers 4 \
+  --print-freq 50 \
+  \
+  --root-dir "${ROOT_DIR}" \
+  --train-annotation "${TRAIN_TXT}" \
+  --val-annotation "${VAL_TXT}" \
+  --test-annotation "${TEST_TXT}" \
+  --bounding-box-face "${FACE_BOX}" \
+  --bounding-box-body "${BODY_BOX}" \
+  \
+  --clip-path "${CLIP_PATH}" \
+  --text-type class_descriptor \
+  --image-size 224 \
+  --num-segments 16 \
+  --duration 1 \
+  --temporal-layers 2 \
+  --contexts-number 16 \
+  \
+  --epochs 100 \
+  --batch-size 16 \
+  \
+  --lr 1e-3 \
+  --lr-image-encoder 1e-6 \
+  --lr-prompt-learner 1e-3 \
+  --milestones 70 90 \
+  --gamma 0.1 \
+  \
+  --lambda-mi 0.5 --mi-warmup 5 \
+  --lambda-dc 0.5 --dc-warmup 5 \
+  \
+  --semantic-smoothing True \
+  --use-focal-loss True \
+  --focal-gamma 2.0 \
+  --unfreeze-visual-last-layer False \
+  \
+  --stage1-epochs 5 \
+  --stage1-label-smoothing 0.05 \
+  --stage1-smoothing-temp 0.15 \
+  \
+  --stage2-epochs 30 \
+  --stage2-logit-adjust-tau 0.4 \
+  --stage2-max-class-weight 2.0 \
+  --stage2-smoothing-temp 0.15 \
+  --stage2-label-smoothing 0.1 \
+  \
+  --stage3-epochs 70 \
+  --stage3-logit-adjust-tau 0.8 \
+  --stage3-max-class-weight 2.5 \
+  --stage3-smoothing-temp 0.18 \
+  \
+  --stage4-logit-adjust-tau 0.5 \
+  --stage4-max-class-weight 1.5
 
-echo "Training Finished."
+# Note: Batch size increased to 16 since Kaggle GPUs (P100/T4) are stronger than Mac MPS.

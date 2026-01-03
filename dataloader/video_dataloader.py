@@ -246,7 +246,14 @@ class VideoDataset(data.Dataset):
 
         images_face = self.transform(images_face)
         images_face = torch.reshape(images_face, (-1, 3, self.image_size, self.image_size))
-        return images_face,images,record.label-1
+        
+        # Debug print for target labels
+        target_label = record.label - 1
+        if not (0 <= target_label <= 4):
+            print(f"DEBUG: Invalid target label {target_label} for record {record.path}. Clamping to [0,4].")
+            target_label = max(0, min(4, target_label)) # Clamp if somehow out of bounds
+
+        return images_face,images,target_label
 
     def __len__(self):
         return len(self.video_list)
@@ -260,9 +267,9 @@ def collate_fn_ignore_none(batch):
 def train_data_loader(list_file, num_segments, duration, image_size,dataset_name,bounding_box_face,bounding_box_body, root_dir, data_percentage: float = 1.0):
     if dataset_name == "RAER":
          train_transforms = torchvision.transforms.Compose([
-            GroupTransform(torchvision.transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05)),
-            RandomRotation(4),
-            GroupResize(image_size),
+            GroupTransform(torchvision.transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1)), # Increased Jitter
+            RandomRotation(15), # Increased Rotation
+            GroupRandomSizedCrop(image_size), # Changed Resize to RandomSizedCrop for geometric variation
             GroupRandomHorizontalFlip(),
             Stack(),
             ToTorchFormatTensor()])

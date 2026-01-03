@@ -44,7 +44,7 @@ exp_group.add_argument('--eval-checkpoint', type=str, default='/media/D/zlm/code
                        help="Path to the model checkpoint for evaluation mode (e.g., outputs/exp_name/model_best.pth).")
 exp_group.add_argument('--exper-name', type=str, default='test', help='A name for the experiment to create a unique output folder.')
 exp_group.add_argument('--dataset', type=str, default='RAER', help='Name of the dataset to use.')
-exp_group.add_argument('--gpu', type=str, default='0', help='ID of the GPU to use, or "mps"/"cpu".')
+exp_group.add_argument('--gpu', type=str, default='mps', help='ID of the GPU to use, or "mps"/"cpu".')
 exp_group.add_argument('--workers', type=int, default=4, help='Number of data loading workers.')
 exp_group.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
 
@@ -52,11 +52,12 @@ exp_group.add_argument('--seed', type=int, default=42, help='Random seed for rep
 path_group = parser.add_argument_group('Data & Path', 'Paths to datasets and pretrained models')
 path_group.add_argument('--root-dir', type=str, default='/media/F/FERDataset/AER-DB', help='Root directory of the dataset.')
 path_group.add_argument('--train-annotation', type=str, default='RAER/annotation/train.txt', help='Path to training annotation file, relative to root-dir.')
+path_group.add_argument('--val-annotation', type=str, default=None, help='Path to validation annotation file. If None, uses test-annotation for validation.')
 path_group.add_argument('--test-annotation', type=str, default='RAER/test.txt', help='Path to testing annotation file, relative to root-dir.')
 path_group.add_argument('--clip-path', type=str, default='/media/D/zlm/code/single_four/models/ViT-B-32.pt', help='Path to the pretrained CLIP model.')
 path_group.add_argument('--bounding-box-face', type=str, default='/media/F/FERDataset/AER-DB/RAER/bounding_box/face_abs.json')
 path_group.add_argument('--bounding-box-body', type=str, default="/media/F/FERDataset/AER-DB/RAER/bounding_box/body_abs.json")
-path_group.add_argument('--data-percentage', type=float, default=1.0, help='Percentage of the dataset to use for training and validation (e.g., 0.1 for 10%).')
+path_group.add_argument('--data-percentage', type=float, default=1.0, help='Percentage of the dataset to use for training and validation (e.g., 0.1 for 10%%).')
 
 # --- Training Control ---
 train_group = parser.add_argument_group('Training Control', 'Parameters to control the training process')
@@ -85,6 +86,8 @@ model_group.add_argument('--load_and_tune_prompt_learner', type=str, default='Tr
 model_group.add_argument('--num-segments', type=int, default=16, help='Number of segments to sample from each video.')
 model_group.add_argument('--duration', type=int, default=1, help='Duration of each segment.')
 model_group.add_argument('--image-size', type=int, default=224, help='Size to resize input images to.')
+model_group.add_argument('--unfreeze-visual-last-layer', type=str, default='False', choices=['True', 'False'], help='Unfreeze the last layer of the visual encoder for fine-tuning.')
+model_group.add_argument('--use-multi-scale', type=str, default='False', choices=['True', 'False'], help='Use multi-scale input (Face + Body/Global) for better feature extraction.')
 
 # --- Loss & Regularization ---
 loss_group = parser.add_argument_group('Loss & Regularization', 'Hyperparameters for loss functions and regularization')
@@ -99,7 +102,35 @@ loss_group.add_argument('--semantic-smoothing', type=str, default='True', choice
 loss_group.add_argument('--smoothing-temp', type=float, default=0.1, help='Temperature for semantic label distribution (lower = sharper).')
 loss_group.add_argument('--use-amp', type=str, default='True', choices=['True', 'False'], help='Enable or disable Automatic Mixed Precision (AMP).')
 loss_group.add_argument('--gradient-accumulation-steps', type=int, default=1, help='Number of steps to accumulate gradients before updating weights.')
+loss_group.add_argument('--use-focal-loss', type=str, default='True', choices=['True', 'False'], help='Use Focal Loss instead of CE for Stage 1.')
+loss_group.add_argument('--focal-gamma', type=float, default=2.0, help='Gamma parameter for Focal Loss.')
 
+# --- Four-Stage Training Control ---
+stage_group = parser.add_argument_group('Four-Stage Training', 'Parameters for the multi-stage training strategy')
+# Stage 1: Warmup (0 -> stage1_epochs)
+stage_group.add_argument('--stage1-epochs', type=int, default=15, help='End epoch of Stage 1 (Warmup).')
+stage_group.add_argument('--stage1-label-smoothing', type=float, default=0.05, help='Label smoothing factor for Stage 1.')
+stage_group.add_argument('--stage1-smoothing-temp', type=float, default=0.15, help='Smoothing temp for Stage 1.')
+
+# Stage 2: Re-balancing (stage1_epochs -> stage2_epochs)
+stage_group.add_argument('--stage2-epochs', type=int, default=40, help='End epoch of Stage 2 (Margin Learning).')
+stage_group.add_argument('--stage2-logit-adjust-tau', type=float, default=0.4, help='Tau for Logit Adjustment in Stage 2.')
+stage_group.add_argument('--stage2-max-class-weight', type=float, default=2.0, help='Max class weight for Weighted Sampler in Stage 2.')
+stage_group.add_argument('--stage2-smoothing-temp', type=float, default=0.15, help='Smoothing temp for Stage 2.')
+stage_group.add_argument('--stage2-label-smoothing', type=float, default=0.1, help='Label smoothing factor for Stage 2.')
+
+# Stage 3: Aggressive UAR (stage2_epochs -> stage3_epochs)
+stage_group.add_argument('--stage3-epochs', type=int, default=75, help='End epoch of Stage 3 (Aggressive UAR).')
+stage_group.add_argument('--stage3-logit-adjust-tau', type=float, default=0.8, help='Tau for Logit Adjustment in Stage 3 (Stronger).')
+stage_group.add_argument('--stage3-max-class-weight', type=float, default=2.5, help='Max class weight for Weighted Sampler in Stage 3.')
+stage_group.add_argument('--stage3-smoothing-temp', type=float, default=0.18, help='Smoothing temp for Stage 3 (Sharper).')
+
+# Stage 4: Cooldown/Polish (stage3_epochs -> end)
+stage_group.add_argument('--stage4-logit-adjust-tau', type=float, default=0.5, help='Tau for Logit Adjustment in Stage 4 (Reduced).')
+stage_group.add_argument('--stage4-max-class-weight', type=float, default=2.0, help='Max class weight for Stage 4 (Stabilized).')
+
+
+stage_group.add_argument('--logit-adjust-tau', type=float, default=0.0, help='Initial Tau for Logit Adjustment (usually 0 for Stage 1).')
 
 
 # ==================== Helper Functions ====================
@@ -156,6 +187,17 @@ def setup_paths_and_logging(args: argparse.Namespace) -> argparse.Namespace:
         
     return args
 
+def calculate_weights(class_counts, max_weight):
+    if class_counts is None:
+        return None
+    total_samples = sum(class_counts)
+    num_classes = len(class_counts)
+    # w_j = N / (K * n_j)
+    weights = total_samples / (num_classes * (class_counts + 1e-6))
+    # Clip
+    weights = np.clip(weights, a_min=None, a_max=max_weight)
+    return weights.tolist()
+
 # ==================== Training Function ====================
 def run_training(args: argparse.Namespace) -> None:
     # Paths for logging and saving
@@ -168,6 +210,42 @@ def run_training(args: argparse.Namespace) -> None:
     start_epoch = 0
     recorder = RecorderMeter(args.epochs)
     
+    # --- STAGE 1 SETUP (Safe Base Learning) ---
+    print("=> INITIALIZING STAGE 1: Warm-up (Epoch 0 - {})".format(args.stage1_epochs))
+    # Standard Setup: No Weighted Sampler, No Weights, No Logit Adj
+    args.logit_adjust_tau = 0.0
+    args.smoothing_temp = args.stage1_smoothing_temp
+    args.label_smoothing = args.stage1_label_smoothing
+    
+    # Disable MI/DC in Stage 1 initially (or very low)
+    args.lambda_mi = 0.0
+    args.lambda_dc = 0.0
+    
+    # Load data first to get class counts
+    print("=> Building dataloaders (Stage 1: Random Shuffle)...")
+    train_loader, val_loader, test_loader_final = build_dataloaders(args, use_weighted_sampler=False)
+    print("=> Dataloaders built successfully.")
+
+    # Pre-calculate class stats
+    class_counts = None
+    if args.dataset == 'RAER':
+        try:
+            train_dataset = train_loader.dataset
+            labels = [record.label - 1 for record in train_dataset.video_list]
+            class_counts = np.bincount(labels)
+            args.class_counts = class_counts.tolist() 
+            print(f"   Class Counts: {class_counts}")
+            
+            # --- STAGE 1 WEIGHTS (None or very mild 1.2) ---
+            # We use None to be strictly "Warm-up" as requested
+            args.class_weights = None 
+            print(f"   [Stage 1] Weights OFF (Standard CE)")
+            
+        except Exception as e:
+            print(f"Warning: Could not calculate class counts. Error: {e}")
+            args.class_counts = None
+            args.class_weights = None
+
     # Build model
     print("=> Building model...")
     class_names, input_text = get_class_info(args)
@@ -175,46 +253,14 @@ def run_training(args: argparse.Namespace) -> None:
     model = model.to(args.device)
     print("=> Model built and moved to device successfully.")
 
-    # Load data
-    print("=> Building dataloaders...")
-    train_loader, val_loader = build_dataloaders(args)
-    print("=> Dataloaders built successfully.")
-
-    # Calculate class weights for RAER to improve recall on minority classes
-    if args.dataset == 'RAER':
-        print("=> Calculating class weights for RAER to handle imbalance...")
-        try:
-            # Access the underlying dataset labels
-            train_dataset = train_loader.dataset
-            # Labels are 1-based in file, 0-based in training
-            labels = [record.label - 1 for record in train_dataset.video_list]
-            
-            # Count frequencies
-            class_counts = np.bincount(labels)
-            total_samples = len(labels)
-            num_classes = len(class_counts)
-            
-            # Compute weights: w_j = N / (K * n_j)
-            # Add epsilon to avoid division by zero
-            class_weights = total_samples / (num_classes * (class_counts + 1e-6))
-            
-            # Clip weights to prevent instability
-            max_weight = 10.0
-            print(f"   Clipping class weights to a maximum of {max_weight}")
-            class_weights = np.clip(class_weights, a_min=None, a_max=max_weight)
-
-            # Pass to args so build_criterion picks it up
-            args.class_weights = class_weights.tolist()
-            
-            print(f"   Class Counts: {class_counts}")
-            print(f"   Computed (and Clipped) Class Weights: {np.round(class_weights, 4)}")
-            print("   (These weights will be used in the Loss function to penalize errors on minority classes more heavily)")
-            
-        except Exception as e:
-            print(f"Warning: Could not calculate class weights automatically. Error: {e}")
-
     # Loss and optimizer
+    # Note: args.class_weights is None for Stage 1
     criterion = build_criterion(args, mi_estimator=model.mi_estimator, num_classes=len(class_names)).to(args.device)
+    
+    # Store original lambdas to restore later
+    original_lambda_mi = 0.5 # Default hardcoded in .sh if not passed, assuming we want to ramp to 0.5
+    original_lambda_dc = 0.5
+
     optimizer = torch.optim.SGD([
         {"params": model.temporal_net.parameters(), "lr": args.lr},
         {"params": model.temporal_net_body.parameters(), "lr": args.lr},
@@ -227,14 +273,113 @@ def run_training(args: argparse.Namespace) -> None:
     
     # Trainer
     trainer = Trainer(
-        model, criterion, optimizer, scheduler, args.device, log_txt_path,
+        model, criterion, optimizer, scheduler, args.device,
         use_amp=(args.use_amp == 'True'), 
-        gradient_accumulation_steps=args.gradient_accumulation_steps
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        log_txt_path=log_txt_path,
+        class_names=class_names
     )
     
     best_war = 0.0 # Track best WAR
 
     for epoch in range(start_epoch, args.epochs):
+        
+        # ==========================================
+        # 4-STAGE TRANSITION LOGIC (REFINED)
+        # ==========================================
+        
+        # --- Enter STAGE 2: DRW (Deferred Re-Weighting) ---
+        if epoch == args.stage1_epochs:
+            print("\n" + "="*50)
+            print(f"   >>> TRANSITIONING TO STAGE 2: DRW - Weighted Sampler (Epoch {epoch}) <<<")
+            print("="*50)
+            
+            # 1. Update Params
+            args.logit_adjust_tau = args.stage2_logit_adjust_tau
+            args.smoothing_temp = args.stage2_smoothing_temp
+            args.label_smoothing = args.stage2_label_smoothing
+            
+            # 2. Switch Sampler (Weighted, Cap 2.0)
+            print(f"   [Stage 2] Switching to WeightedRandomSampler (Max Weight {args.stage2_max_class_weight})...")
+            # We pass stage2_max_class_weight via args to build_dataloaders implicitly or we need to update args first
+            # The build_dataloaders function uses args.stage2_max_class_weight if present.
+            train_loader, val_loader, test_loader_final = build_dataloaders(args, use_weighted_sampler=True)
+            
+            # 3. Weights: OFF (Avoid Double Reweighting)
+            print(f"   [Stage 2] Class Weights: OFF (Handled by Sampler)")
+            args.class_weights = None
+            
+            # 4. Ramp up MI/DC
+            print(f"   [Stage 2] Ramping up MI/DC Loss...")
+            criterion.lambda_mi = original_lambda_mi
+            criterion.lambda_dc = original_lambda_dc
+            
+            # 5. Update Criterion
+            criterion.logit_adjust_tau = args.logit_adjust_tau
+            criterion.smoothing_temp = args.smoothing_temp
+            criterion.label_smoothing = args.label_smoothing
+            criterion.class_weights = None # Explicitly set to None
+            if criterion.ce_loss is not None:
+                criterion.ce_loss.weight = None
+                criterion.ce_loss.label_smoothing = args.label_smoothing
+            
+            # Ensure Priors for Logit Adj
+            if criterion.class_priors is None and class_counts is not None:
+                counts_t = torch.tensor(class_counts, dtype=torch.float32).to(args.device)
+                priors = counts_t / counts_t.sum()
+                criterion.register_buffer("class_priors", priors)
+            
+            print("   [Stage 2] Transition Complete.\n")
+
+        # --- Enter STAGE 3: Targeted Push ---
+        elif epoch == args.stage2_epochs:
+            print("\n" + "="*50)
+            print(f"   >>> TRANSITIONING TO STAGE 3: Targeted Push (Epoch {epoch}) <<<")
+            print("="*50)
+            
+            # 1. Update Params (Aggressive but Controlled)
+            args.logit_adjust_tau = args.stage3_logit_adjust_tau
+            args.smoothing_temp = args.stage3_smoothing_temp # Increased to 0.18 to separate classes
+            
+            # 2. Update Sampler (Cap 2.5)
+            # We need to rebuild dataloader to update sampler weights cap
+            print(f"   [Stage 3] Updating WeightedRandomSampler (Max Weight {args.stage3_max_class_weight})...")
+            # Temporarily overwrite stage2_max_class_weight logic in build_dataloaders or just pass the arg correctly
+            # We will hack it slightly by updating the arg used by build_dataloaders
+            args.stage2_max_class_weight = args.stage3_max_class_weight 
+            train_loader, val_loader, test_loader_final = build_dataloaders(args, use_weighted_sampler=True)
+            
+            # 3. Weights: Still OFF
+            
+            # 4. Update Criterion
+            criterion.logit_adjust_tau = args.logit_adjust_tau
+            criterion.smoothing_temp = args.smoothing_temp
+            # Class weights remain None
+
+            print("   [Stage 3] Transition Complete.\n")
+
+        # --- Enter STAGE 4: Cooldown & Polish ---
+        elif epoch == args.stage3_epochs:
+            print("\n" + "="*50)
+            print(f"   >>> TRANSITIONING TO STAGE 4: Cooldown & Polish (Epoch {epoch}) <<<")
+            print("="*50)
+            
+            # 1. Update Params (Stable)
+            args.logit_adjust_tau = args.stage4_logit_adjust_tau
+            
+            # 2. Update Sampler (Cap 2.0 - Reduced)
+            print(f"   [Stage 4] Reducing WeightedRandomSampler (Max Weight {args.stage4_max_class_weight})...")
+            args.stage2_max_class_weight = args.stage4_max_class_weight
+            train_loader, val_loader, test_loader_final = build_dataloaders(args, use_weighted_sampler=True)
+            
+            # 3. Weights: Still OFF
+            
+            # 4. Update Criterion
+            criterion.logit_adjust_tau = args.logit_adjust_tau
+            # Temp can stay or reduce slightly, keeping it stable
+            
+            print("   [Stage 4] Transition Complete. LR should be decaying now.\n")
+
         inf = f'******************** Epoch: {epoch} ********************'
         start_time = time.time()
         print(inf)
@@ -296,13 +441,13 @@ def run_training(args: argparse.Namespace) -> None:
     pre_trained_dict = torch.load(best_checkpoint_path,map_location=args.device)['state_dict']
     model.load_state_dict(pre_trained_dict)
     computer_uar_war(
-        val_loader=val_loader,
+        val_loader=test_loader_final, # Changed to test_loader_final for final evaluation
         model=model,
         device=args.device,
         class_names=class_names,
         log_confusion_matrix_path=log_confusion_matrix_path,
         log_txt_path=log_txt_path,
-        title=f"Confusion Matrix on {args.dataset}"
+        title=f"Confusion Matrix on {args.dataset} (Final Test Set)"
     )
 
 def run_eval(args: argparse.Namespace) -> None:
@@ -319,15 +464,17 @@ def run_eval(args: argparse.Namespace) -> None:
     model.load_state_dict(ckpt["state_dict"], strict=True)
 
     # Load data
-    _, val_loader = build_dataloaders(args)
+    _, _, test_loader_final = build_dataloaders(args) # Unpack all three, but only use test_loader_final
 
     # Run evaluation
     computer_uar_war(
-        test_loader=val_loader,
+        val_loader=test_loader_final,
         model=model,
         device=args.device,
-        class_names=class_names,
-        log_txt_path=log_txt_path
+        class_names=class_names, # Pass class_names
+        log_txt_path=log_txt_path,
+        log_confusion_matrix_path=log_confusion_matrix_path, # Pass log_confusion_matrix_path
+        title=f"Confusion Matrix on {args.dataset} (Final Test Set)"
     )
     print("=> Evaluation complete.")
 

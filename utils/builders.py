@@ -21,24 +21,15 @@ def build_model(args: argparse.Namespace, input_text: list) -> torch.nn.Module:
     if '/' in args.clip_path: # e.g., "ViT-B/16"
         CLIP_model, _ = clip.load(args.clip_path, device='cpu')
     else: # e.g., "models/ViT-B-16.pt" or "path/to/ViT-B-32.pt"
-        # Assuming args.clip_path is a local path to the actual .pt file
-        # We need to construct the full path if root_dir is used for clip_path
-        # However, CLIP expects direct model names for its default loading.
-        # If it's a local file, it should be passed directly to clip.load
-        # The user's original train.sh had ViT-B/32, which is a model name.
-        # If it's a full path to a downloaded .pt file, clip.load might handle it.
-        # For now, let's assume it's a model name like ViT-B/16.
-        # If args.clip_path is a local file, it usually looks like "ViT-B-32.pt" in the models/clip folder.
-        # The build_model function should handle the loading of the CLIP model from the path provided
-        # or from its identifier. Let's make sure it handles the case where it's a local file in root_dir.
-        
-        # Checking if it's a model name or a path that needs to be joined with root_dir
-        # A simple check: if it doesn't contain a slash, it might be a local filename.
-        # CLIP's load function typically takes a model name (e.g., "ViT-B/16") or a local path to a .pt file.
-        # The earlier change was `--clip-path ViT-B/16`. This is a model name, not a file path.
-        # If it was a local file, the original path in train.sh was /media/D/zlm/code/single_four/models/ViT-B-32.pt
-        # Let's revert to the assumption that args.clip_path is a model identifier unless proven otherwise.
         CLIP_model, _ = clip.load(args.clip_path, device='cpu')
+    
+    # ✅ FIX: MPS (Apple Silicon) is unstable with FP16 in some layers. Force Float32.
+    if args.gpu == 'mps':
+        print("   [System] Detected MPS (Apple Silicon). Converting CLIP model to Float32 for stability.")
+        CLIP_model = CLIP_model.float()
+        # Explicitly update dtype attribute if it exists, as .float() might not update the custom attribute
+        # if hasattr(CLIP_model, 'dtype'):
+        #     CLIP_model.dtype = torch.float32
 
 
     print("\nInput Text Prompts:")
@@ -52,6 +43,18 @@ def build_model(args: argparse.Namespace, input_text: list) -> torch.nn.Module:
         param.requires_grad = False
 
     trainable_params_keywords = ["image_encoder", "temporal_net", "prompt_learner", "temporal_net_body", "project_fc"]
+    
+    # Unfreeze last visual layer if requested
+    if getattr(args, 'unfreeze_visual_last_layer', 'False') == 'True':
+        print("   -> Unfreezing visual layers (resblocks.10, 11 + ln_post)...")
+        # Add keywords specific to the last transformer block and final layer norm of the visual encoder
+        # Note: In GenerateModel, clip_model is usually assigned to self.model or self.image_encoder (if wrapped).
+        # Based on Generate_Model.py inspection, it seems CLIP components are inside.
+        # Let's target the parameter names directly.
+        trainable_params_keywords.append("visual.transformer.resblocks.10")
+        trainable_params_keywords.append("visual.transformer.resblocks.11")
+        trainable_params_keywords.append("visual.ln_post")
+
     print('\nTrainable parameters:')
     for name, param in model.named_parameters():
         if any(keyword in name for keyword in trainable_params_keywords):
@@ -90,8 +93,13 @@ def get_class_info(args: argparse.Namespace) -> Tuple[list, list]:
 
 
 
-def build_dataloaders(args: argparse.Namespace) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]: 
+def build_dataloaders(args: argparse.Namespace, use_weighted_sampler: bool = False) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader, torch.utils.data.DataLoader]: 
     train_annotation_file_path = os.path.join(args.root_dir, args.train_annotation)
+    
+    val_annotation_file_path = None
+    if args.val_annotation:
+        val_annotation_file_path = os.path.join(args.root_dir, args.val_annotation)
+    
     test_annotation_file_path = os.path.join(args.root_dir, args.test_annotation)
     
     # Correctly join root_dir with bounding box paths
@@ -106,24 +114,80 @@ def build_dataloaders(args: argparse.Namespace) -> Tuple[torch.utils.data.DataLo
         root_dir=args.root_dir, data_percentage=args.data_percentage
     )
     
-    print("Loading test data...")
+    val_data = None
+    val_collate_fn = None
+    if val_annotation_file_path:
+        print("Loading validation data...")
+        # Force data_percentage=1.0 for validation
+        val_data, val_collate_fn = test_data_loader( 
+            list_file=val_annotation_file_path, num_segments=args.num_segments,
+            duration=args.duration, image_size=args.image_size,
+            bounding_box_face=bounding_box_face_path,bounding_box_body=bounding_box_body_path,
+            root_dir=args.root_dir, data_percentage=1.0
+        )
+    
+    print("Loading test data (for final evaluation)...")
+    # Force data_percentage=1.0 for test
     test_data, test_collate_fn = test_data_loader(
         list_file=test_annotation_file_path, num_segments=args.num_segments,
         duration=args.duration, image_size=args.image_size,
         bounding_box_face=bounding_box_face_path,bounding_box_body=bounding_box_body_path,
-        root_dir=args.root_dir, data_percentage=args.data_percentage
+        root_dir=args.root_dir, data_percentage=1.0
     )
 
     print("Creating DataLoader instances...")
+    
+    if use_weighted_sampler:
+        print("   Using WeightedRandomSampler for training data...")
+        # Calculate weights
+        try:
+            labels = [record.label - 1 for record in train_data.video_list]
+            class_counts = np.bincount(labels)
+            total_samples = len(labels)
+            # Weight for each class: N / n_j
+            class_weights_raw = 1.0 / class_counts
+            
+            # Clip class weights based on args.stage2_max_class_weight (if in Stage 2 context)
+            # Default to no clipping if not provided or in Stage 1
+            max_weight = getattr(args, 'stage2_max_class_weight', None)
+            if max_weight is not None:
+                class_weights_raw = np.clip(class_weights_raw, a_min=None, a_max=max_weight)
+
+            sample_weights = [class_weights_raw[l] for l in labels]
+            sample_weights = torch.DoubleTensor(sample_weights)
+            
+            sampler = torch.utils.data.WeightedRandomSampler(sample_weights, len(sample_weights))
+            shuffle = False # Sampler is mutually exclusive with shuffle
+        except Exception as e:
+            print(f"   Warning: Failed to create WeightedRandomSampler ({e}). Falling back to shuffle=True.")
+            sampler = None
+            shuffle = True
+    else:
+        sampler = None
+        shuffle = True
+
     train_loader = torch.utils.data.DataLoader(
-        train_data, batch_size=args.batch_size, shuffle=True,
+        train_data, batch_size=args.batch_size, shuffle=shuffle,
+        sampler=sampler,
         num_workers=args.workers, pin_memory=True, drop_last=True,
         collate_fn=train_collate_fn
     )
+    
+    # Use test_data for validation if val_data is None
+    current_val_data = val_data if val_data is not None else test_data
+    current_val_collate_fn = val_collate_fn if val_collate_fn is not None else test_collate_fn
+
     val_loader = torch.utils.data.DataLoader(
+        current_val_data, batch_size=args.batch_size, shuffle=False,
+        num_workers=args.workers, pin_memory=True,
+        collate_fn=current_val_collate_fn
+    )
+
+    # Separate test_loader for final evaluation
+    test_loader_final = torch.utils.data.DataLoader(
         test_data, batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True,
         collate_fn=test_collate_fn
     )
     
-    return train_loader, val_loader
+    return train_loader, val_loader, test_loader_final

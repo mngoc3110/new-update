@@ -1,0 +1,52 @@
+**Chiến lược 4-Stage Ultimate: "Chậm mà chắc, Tăng tốc rồi Hạ cánh"**
+
+Đây là cơ chế chi tiết của chiến lược training 4 giai đoạn mà chúng ta đang áp dụng, được thiết kế để tối ưu hóa khả năng học của mô hình trên dữ liệu mất cân bằng nghiêm trọng như RAER.
+
+---
+
+**1. Stage 1: Xây móng (Warm-up)**
+*   **Thời gian:** Epoch 0 - 15
+*   **Mục tiêu:** **Học cái DỄ trước.** Ổn định các thành phần của mô hình (đặc biệt là sau khi load pre-trained CLIP), tránh các lỗi NaN/Inf, và xây dựng một nền tảng trích xuất đặc trưng vững chắc. Trọng tâm là giúp mô hình học cách nhận diện các lớp chiếm đa số một cách đáng tin cậy.
+*   **Vũ khí sử dụng:**
+    *   **Class Weight thấp (Max 1.5):** Không tạo áp lực cho mô hình phải học các lớp hiếm ngay từ đầu.
+    *   **Random Sampler:** Lấy mẫu dữ liệu ngẫu nhiên, cho phép mô hình tiếp xúc nhiều với các lớp đa số.
+    *   **Augmentation mạnh:** Buộc mô hình học các đặc trưng mạnh mẽ, không chỉ học vẹt các pixel.
+*   **Kết quả mong đợi:** WAR (Weighted Average Recall - độ chính xác chung) sẽ tăng nhanh và đạt mức cao nhất có thể trong giai đoạn này. UAR (Unweighted Average Recall - độ chính xác cân bằng, quan trọng cho lớp hiếm) sẽ còn thấp.
+
+---
+
+**2. Stage 2: Mở rộng (Margin Learning)**
+*   **Thời gian:** Epoch 16 - 40
+*   **Mục tiêu:** **Bắt đầu chú ý lớp KHÓ.** Sau khi mô hình đã vững vàng với các lớp đa số, đây là lúc ta "nhắc nhở" nó về sự tồn tại của các lớp thiểu số. Mô hình sẽ được khuyến khích mở rộng "biên giới quyết định" để nhường chỗ cho các lớp hiếm.
+*   **Vũ khí sử dụng:**
+    *   **Class Weight trung bình (Max 3.0):** Tăng hình phạt cho việc đoán sai các lớp hiếm.
+    *   **Weighted Sampler:** **CHUYỂN GIAO QUAN TRỌNG NHẤT.** Bộ lấy mẫu này sẽ "bốc" các mẫu của lớp hiếm thường xuyên hơn, đảm bảo mô hình nhìn thấy chúng đủ nhiều trong mỗi epoch.
+    *   **Logit Adjustment nhẹ (Tau 0.5):** Một cơ chế điều chỉnh loss function để tạo ra một "biên độ an toàn" cho các lớp hiếm, giúp model ít bị "thiên vị" lớp đa số.
+*   **Kết quả mong đợi:** UAR sẽ bắt đầu nhích lên đáng kể. WAR có thể dao động nhẹ hoặc giữ ổn định.
+
+---
+
+**3. Stage 3: Tấn công (Aggressive UAR Push)**
+*   **Thời gian:** Epoch 41 - 75
+*   **Mục tiêu:** **Tối ưu hóa lớp KHÓ đến cực đại.** Giai đoạn này là "tổng tấn công" vào các lớp thiểu số để đẩy UAR lên mức cao nhất có thể, đạt được mục tiêu 70% của bạn.
+*   **Vũ khí sử dụng:**
+    *   **Class Weight cực cao (Max 10.0):** Mô hình bị phạt cực kỳ nặng nếu đoán sai một mẫu của lớp hiếm. Điều này buộc nó phải học các đặc trưng tinh tế nhất của những lớp này.
+    *   **Logit Adjustment mạnh (Tau 1.2):** Tăng cường "biên độ an toàn" cho lớp hiếm một cách tối đa, ép các lớp đa số "né" ra.
+    *   **Weighted Sampler:** Vẫn được sử dụng để đảm bảo tần suất xuất hiện của lớp hiếm.
+*   **Kết quả mong đợi:** UAR sẽ tăng vọt lên mức cao nhất. Tuy nhiên, WAR có thể giảm vì mô hình trở nên "quá nhạy cảm", dễ bị nhầm lẫn giữa các lớp.
+
+---
+
+**4. Stage 4: Hạ cánh (Cooldown & Polish)**
+*   **Thời gian:** Epoch 76 - 100
+*   **Mục tiêu:** **Cân bằng lại.** Sau giai đoạn "khắc nghiệt" của Stage 3, mô hình thường bị "quá khích" (over-corrected), nghĩa là nó có thể đoán các lớp hiếm quá mức. Stage 4 giúp mô hình "bình tĩnh" lại, tìm kiếm sự cân bằng tối ưu giữa việc nhận diện tốt lớp hiếm (UAR) và giữ độ chính xác tổng thể (WAR).
+*   **Vũ khí sử dụng:**
+    *   **Class Weight giảm nhẹ (Max 3.0):** Giảm bớt áp lực phạt từ lớp hiếm, cho phép model học cách phân biệt tinh tế hơn.
+    *   **Logit Adjustment giảm nhẹ (Tau 0.8):** Biên độ an toàn vẫn còn, nhưng không còn quá cực đoan.
+    *   **Learning Rate thấp (qua Milestones):** Tinh chỉnh các tham số model một cách từ tốn, cẩn thận.
+    *   **Weighted Sampler:** Vẫn giữ nguyên để đảm bảo lớp hiếm không bị "quên".
+*   **Kết quả mong đợi:** WAR sẽ hồi phục trở lại, đồng thời UAR vẫn giữ ở mức cao, mang lại hiệu suất cân bằng nhất cho mô hình.
+
+---
+
+Đây là một chiến lược đào tạo toàn diện, từng bước giúp mô hình của bạn vượt qua thách thức mất cân bằng dữ liệu, hướng tới mục tiêu UAR cao nhất.

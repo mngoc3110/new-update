@@ -1,0 +1,49 @@
+**Phương Pháp Training Hiện Tại: 3-Stage Safe & Balanced Strategy**
+
+Đây là chiến lược huấn luyện mô hình CLIP cho bài toán nhận diện cảm xúc (RAER) với dữ liệu mất cân bằng nghiêm trọng, tập trung vào sự ổn định và tăng trưởng bền vững.
+
+---
+
+**Mục tiêu cốt lõi:**
+Đạt được độ chính xác cân bằng (UAR) cao cho các lớp hiếm (Confusion, Enjoyment) mà không làm sụt giảm nghiêm trọng độ chính xác chung (WAR).
+
+**Cấu hình chung:**
+*   **Tổng số Epoch:** 60
+*   **Data Augmentation:** Mạnh (ColorJitter 0.3, Rotation 15 độ, RandomSizedCrop) để chống học vẹt (overfitting).
+*   **Loss Function:** Cross Entropy kết hợp Semantic Smoothing (LDLVA) và Logit Adjustment (Menon et al.).
+
+---
+
+**Chi tiết 3 Giai đoạn (3 Stages):**
+
+**1. Stage 1: Warm-up (Xây Móng)**
+*   **Thời gian:** Epoch 0 - 15.
+*   **Mục tiêu:** Ổn định mô hình, học tốt lớp đa số (Neutrality), tránh lỗi NaN.
+*   **Cấu hình:**
+    *   **Sampler:** Random (Ngẫu nhiên).
+    *   **Class Weight:** TẮT (None).
+    *   **Logit Adjustment:** TẮT.
+    *   **Smoothing:** Nhẹ (Temp 0.15, Label Smooth 0.05).
+*   **Hiện trạng:** WAR cao (~65%), Neutrality Recall ~100%, các lớp khác ~0%. Đây là dấu hiệu tốt, tạo nền tảng vững chắc.
+
+**2. Stage 2: DRW - Deferred Re-Weighting (Mở Rộng)**
+*   **Thời gian:** Epoch 16 - 40.
+*   **Mục tiêu:** Bắt đầu ép mô hình học các lớp hiếm.
+*   **Cấu hình:**
+    *   **Sampler:** **Weighted Random Sampler** (Cap 2.0). Đây là thay đổi quan trọng nhất để tăng tần suất xuất hiện của lớp hiếm.
+    *   **Logit Adjustment:** BẬT (Tau 0.4) - Tạo biên độ an toàn cho lớp hiếm.
+    *   **Class Weight:** TẮT (Để tránh phạt kép với Sampler).
+    *   **Loss phụ (MI/DC):** Bắt đầu tăng dần (Ramp up) để học đặc trưng tốt hơn.
+
+**3. Stage 3: Targeted Push & Cooldown (Tinh Chỉnh)**
+*   **Thời gian:** Epoch 41 - 60.
+*   **Mục tiêu:** Tối ưu hóa UAR và sau đó ổn định lại mô hình.
+*   **Cấu hình:**
+    *   **Sampler:** Giảm nhẹ (Cap 1.5).
+    *   **Logit Adjustment:** Giảm nhẹ (Tau 0.2).
+    *   **Smoothing:** Giảm nhiệt (Temp 0.12) để làm sắc nét dự đoán.
+    *   **Learning Rate:** Giảm thấp (qua milestones) để tinh chỉnh trọng số.
+
+---
+
+**Tóm lại:** Chúng ta đang đi từ "Dễ đến Khó", từ "Tổng quát đến Chi tiết". Hiện tại đang ở Stage 1 (học cái dễ), chuẩn bị sang Stage 2 (bắt đầu học cái khó).
