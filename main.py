@@ -94,6 +94,7 @@ model_group.add_argument('--use-hierarchical-prompt', type=str, default='False',
 
 # --- Loss & Regularization ---
 loss_group = parser.add_argument_group('Loss & Regularization', 'Hyperparameters for loss functions and regularization')
+loss_group.add_argument('--use-lsr2-loss', type=str, default='False', choices=['True', 'False'], help='Use LSR2 loss (baseline specific) instead of standard CE/Focal Loss.')
 loss_group.add_argument('--lambda-mi', type=float, default=1.0, help='Weight for Mutual Information (MI) loss.')
 loss_group.add_argument('--lambda-dc', type=float, default=1.0, help='Weight for Distance Correlation (DC) loss.')
 loss_group.add_argument('--lambda-cons', type=float, default=0.0, help='Weight for Consistency Loss (KL Divergence).')
