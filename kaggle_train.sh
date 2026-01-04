@@ -71,6 +71,8 @@ python main.py \
   --lambda-dc 0.5 --dc-warmup 5 \
   --lambda-cons 0.1 \
   \
+  --use-lsr2-loss True \
+  \
   --semantic-smoothing True \
   --use-focal-loss True \
   --focal-gamma 2.0 \
