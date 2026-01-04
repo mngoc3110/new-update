@@ -1,12 +1,12 @@
 #!/bin/bash
 set -e
 
-# Experiment Name: ViTB32 + Focal + StrongHead + StrongerSemanticSmoothing
-EXP="ViTB32_4Stage_FullOptimization_100Epochs"
+# Experiment Name: ViTB32 + Focal + StrongHead + StrongerSemanticSemanticSmoothing
+EXP="ViTB32_LiteHiCroPL_4Stage_SmartPush_100Epochs"
 OUT="outputs/${EXP}-$(date +%m-%d-%H%M)"
 mkdir -p "${OUT}"
 
-echo "Starting Stable Training: ViT-B/32 + Correct Logit Adjustment + 4-Stage Full Optimization (100 Epochs)"
+echo "Starting Stable Training: ViT-B/32 + Lite-HiCroPL + 4-Stage Smart Push (100 Epochs)"
 
 python main.py \
   --mode train \
@@ -31,6 +31,8 @@ python main.py \
   --temporal-layers 2 \
   --contexts-number 16 \
   \
+  --use-hierarchical-prompt True \
+  \
   --epochs 100 \
   --batch-size 8 \
   \
@@ -42,6 +44,7 @@ python main.py \
   \
   --lambda-mi 0.5 --mi-warmup 5 \
   --lambda-dc 0.5 --dc-warmup 5 \
+  --lambda-cons 0.1 \
   \
   --semantic-smoothing True \
   --use-focal-loss True \
@@ -53,24 +56,21 @@ python main.py \
   --stage1-smoothing-temp 0.15 \
   \
   --stage2-epochs 30 \
-  --stage2-logit-adjust-tau 0.4 \
+  --stage2-logit-adjust-tau 0.5 \
   --stage2-max-class-weight 2.0 \
   --stage2-smoothing-temp 0.15 \
   --stage2-label-smoothing 0.1 \
   \
   --stage3-epochs 70 \
   --stage3-logit-adjust-tau 0.8 \
-  --stage3-max-class-weight 2.5 \
+  --stage3-max-class-weight 5.0 \
   --stage3-smoothing-temp 0.18 \
   \
-  --stage4-logit-adjust-tau 0.5 \
-  --stage4-max-class-weight 1.5
+  --stage4-logit-adjust-tau 0.2 \
+  --stage4-max-class-weight 1.2
 
-# 4-Stage Full Optimization (100 Epochs):
-# Stage 1 (0-5): Short Warmup -> Stabilize quickly.
-# Stage 2 (6-30): DRW -> Introduce minority classes early.
-# Stage 3 (31-70): Targeted Push -> Aggressively boost Confusion/Enjoyment.
-# Stage 4 (71-100): Cooldown -> Refine and balance WAR/UAR with low LR.
-
-
- 
+# 4-Stage "Smart Push" Strategy with Lite-HiCroPL:
+# Stage 1 (0-5): Warmup.
+# Stage 2 (6-30): Intro Minority (Weight 2.0).
+# Stage 3 (31-70): Aggressive but Controlled (Weight 5.0, Tau 0.8).
+# Stage 4 (71-100): Gentle Cooldown (Weight 1.2, Tau 0.2). 

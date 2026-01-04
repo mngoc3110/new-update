@@ -1,0 +1,60 @@
+**Tóm Tắt Các Thay Đổi trong `models/Text.py` (Nâng cấp Lite-HiCroPL lên "Forensic Prompt")**
+
+Để đạt được mục tiêu UAR > 70% và Recall từng lớp cao, tôi đã tối ưu hóa các mô tả (Prompts) trong file `models/Text.py` theo hướng **"Độc quyền & Giải phẫu học" (Exclusive & Anatomical)**. Mục tiêu là cung cấp cho CLIP những manh mối hình học và hành vi cực kỳ cụ thể, không gây nhầm lẫn giữa các lớp cảm xúc, đặc biệt là Neutrality và các lớp hiếm.
+
+---
+
+**Cơ chế chính:** Mọi mô tả đều được tinh chỉnh để tập trung vào **đặc điểm vật lý có thể quan sát được** thay vì trạng thái cảm xúc chung chung.
+
+**Chi tiết các thay đổi cho từng Level của `get_hierarchical_prompts()`:**
+
+### **Level 1: Visual Primitives (Đặc điểm thị giác cơ bản/Giải phẫu học)**
+Tập trung vào các cử động cơ mặt, vị trí mí mắt, môi, đồng tử một cách khoa học nhất để tạo sự phân biệt rõ ràng.
+
+*   **Neutrality:**
+    *   `"Smooth forehead without wrinkles, eyelids naturally open with iris centered, lips touching lightly without tension."`
+    *   *(Loại bỏ mọi dấu hiệu căng thẳng cơ, đảm bảo mắt và miệng ở trạng thái tự nhiên nhất).*
+*   **Enjoyment:**
+    *   `"Activation of orbicularis oculi (crow's feet) and zygomaticus major (raised cheeks), mouth corners pulled up."`
+    *   *(Tập trung vào hai dấu hiệu cốt lõi của "nụ cười Duchenne" (cười thật): vết chân chim ở đuôi mắt và gò má nâng cao).*
+*   **Confusion:**
+    *   `"Vertical glabella lines (frown lines) between eyebrows, inner eyebrows pulled together and down, narrowed eye aperture."`
+    *   *(Mô tả sự kích hoạt cơ cau mày (Corrugator) rất rõ ràng, tạo nếp nhăn dọc giữa hai lông mày và làm hẹp mí mắt - dấu hiệu căng thẳng não bộ).*
+*   **Fatigue:**
+    *   `"Ptosis (drooping upper eyelids) covering part of pupil, slack jaw, heavy eyes with slow blink rate."`
+    *   *(Tập trung vào sự mất kiểm soát cơ (sụp mí, hàm trễ) và giảm tần suất chớp mắt - dấu hiệu vật lý của sự mệt mỏi).*
+*   **Distraction:**
+    *   `"Saccadic eye movements shifting rapidly, pupils directed laterally away from screen, head rotated away from axis."`
+    *   *(Mô tả rõ ràng chuyển động mắt không mục đích và sự định hướng cơ thể ra khỏi nhiệm vụ chính).*
+
+### **Level 2: Behavioral Actions (Hành động/Cử chỉ cụ thể)**
+Tập trung vào các hành vi dễ quan sát, đặc biệt là các cử chỉ tay và tư thế cơ thể, giúp phân biệt rõ hơn giữa các trạng thái tĩnh.
+
+*   **Neutrality:**
+    *   `"Maintaining a static upright posture, eyes tracking the screen content steadily, taking notes rhythmically."`
+    *   *(Mô tả hành vi chuẩn mực của một người đang tập trung học tập mà không có cảm xúc đặc biệt).*
+*   **Enjoyment:**
+    *   `"Nodding head repeatedly in agreement, leaning torso forward towards the screen, clapping or hand gestures of approval."`
+    *   *(Các hành vi biểu hiện sự đồng tình, hứng thú và tham gia tích cực vào bài học).*
+*   **Confusion:**
+    *   `"Scratching head or temple, biting lower lip, tilting head to the side while staring fixedly, freezing hand movement."`
+    *   *(Các cử chỉ tay chạm đầu, cắn môi, hoặc cơ thể "đóng băng" thể hiện sự khó khăn trong tư duy).*
+*   **Fatigue:**
+    *   `"Propping head on hand, head nodding off (micro-sleeps) and snapping back, rubbing eyes vigorously, covering a wide open yawn with hand."`
+    *   *(Các hành vi vật lý liên quan đến cố gắng chống lại cơn buồn ngủ).*
+*   **Distraction:**
+    *   `"Engaging with a smartphone held in hand, looking around the room, talking to others, physically turning body away from desk."`
+    *   *(Các hành vi tương tác với môi trường hoặc đối tượng không liên quan đến bài học).*
+
+### **Level 3: Abstract Emotion (Trạng thái tinh thần/Ngữ cảnh)**
+Giữ nguyên các mô tả trừu tượng, ngắn gọn để cung cấp ngữ cảnh tổng quát.
+
+*   `"A student maintaining normal attention and baseline composure."`
+*   `"A student exhibiting high engagement, interest, and positive affect."`
+*   `"A student experiencing cognitive dissonance, difficulty, and puzzlement."`
+*   `"A student suffering from exhaustion, drowsiness, and low energy."`
+*   `"A student completely disengaged from the learning task, focusing on external stimuli."`
+
+---
+
+Việc chi tiết hóa này sẽ cung cấp cho CLIP những "mỏ neo" ngữ nghĩa vững chắc hơn ở nhiều cấp độ, giúp nó phân biệt chính xác hơn các cảm xúc tinh tế và đạt được mục tiêu UAR cao mà bạn mong muốn.

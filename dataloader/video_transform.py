@@ -267,9 +267,10 @@ class GroupRandomSizedCrop(object):
             return out_group
         else:
             # Fallback
-            scale = GroupScale(self.size, interpolation=self.interpolation)
-            crop = GroupRandomCrop(self.size)
-            return crop(scale(img_group))
+            # Use GroupResize instead of GroupScale to force fixed size directly
+            resize_op = GroupResize(self.size, interpolation=self.interpolation)
+            crop_op = GroupRandomCrop(self.size)
+            return crop_op(resize_op(img_group))
 
 class ColorJitter(object):
     """Randomly change the brightness, contrast and saturation and hue of the clip

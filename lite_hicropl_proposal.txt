@@ -1,0 +1,43 @@
+**Đề xuất Tối ưu hóa: Tích hợp Hierarchical Prompting ("Lite-HiCroPL") vào Dự án RAER**
+
+Dựa trên phân tích repo HiCroPL (ICCV 2025) và hiện trạng dự án (UAR bão hòa), tôi đề xuất phương pháp cải tiến tập trung vào việc đa dạng hóa Prompt để đạt target cao (Fatigue > 80%, Distraction > 70%).
+
+---
+
+**1. Vấn đề hiện tại:**
+*   Mô hình đang sử dụng một **Single Descriptor Prompt** (một câu mô tả dài) cho mỗi lớp.
+*   Hạn chế: Câu mô tả dài dễ bị "loãng" thông tin. Nếu video chỉ khớp 1 phần nhỏ của mô tả (ví dụ: chỉ "nhìn đi chỗ khác" nhưng không "cầm điện thoại"), model dễ đoán sai về Neutrality.
+*   Hệ quả: Recall của các lớp phức tạp (Distraction, Fatigue) bị thấp do thiếu các "điểm neo" (anchors) cụ thể.
+
+**2. Giải pháp: "Lite-HiCroPL" (Multi-Level Prompt Ensemble)**
+Lấy cảm hứng từ cơ chế phân tầng (Hierarchical) của HiCroPL, chúng ta sẽ chia nhỏ Prompt thành 3 tầng ngữ nghĩa:
+
+*   **Level 1: Visual Primitives (Đặc điểm thị giác cơ bản)**
+    *   Mô tả các chi tiết vật lý, cử chỉ nhỏ nhất mà CLIP dễ bắt nhất.
+    *   *Ví dụ (Fatigue):* "Eyes closing", "Mouth wide open (yawning)", "Head dropping".
+    *   *Mục tiêu:* Tận dụng khả năng nhận diện vật thể/hành động cấp thấp của CLIP.
+
+*   **Level 2: Behavioral Actions (Hành động/Trạng thái)**
+    *   Mô tả hành vi cụ thể.
+    *   *Ví dụ (Distraction):* "Using a smartphone", "Looking around the room", "Fidgeting with pen".
+    *   *Mục tiêu:* Liên kết các đặc điểm vật lý thành một hành động có ý nghĩa.
+
+*   **Level 3: Abstract Emotion (Cảm xúc trừu tượng)**
+    *   Mô tả trạng thái tâm lý tổng quát (như hiện tại).
+    *   *Ví dụ:* "Feeling tired and sleepy", "Distracted and losing focus".
+    *   *Mục tiêu:* Định hướng ngữ nghĩa cuối cùng.
+
+**3. Cơ chế hoạt động (Ensemble Logic):**
+*   Thay vì chỉ tính một Logit từ Level 3, chúng ta sẽ tính Logit cho cả 3 Level.
+*   **Final Logit = w1 * Logit(L1) + w2 * Logit(L2) + w3 * Logit(L3)**
+*   **Tác dụng:**
+    *   Nếu model thấy "Mắt nhắm" (L1 cao), dù nó chưa chắc chắn là "Mệt mỏi" (L3 thấp), nhưng tổng điểm vẫn sẽ kéo về lớp Fatigue -> Tăng Recall.
+    *   Giúp model "nhặt nhạnh" từng manh mối nhỏ nhất để đưa ra quyết định, thay vì đòi hỏi một khuôn mặt "chuẩn sách giáo khoa".
+
+**4. Kế hoạch thay đổi Code:**
+*   **`models/Text.py`:** Cập nhật để trả về danh sách các Prompt theo tầng thay vì 1 list duy nhất.
+*   **`models/Generate_Model.py`:** Sửa hàm `forward` để tính toán 3 bộ feature text riêng biệt, sau đó ensemble logits lại trước khi đưa vào Loss.
+*   **`utils/builders.py`:** Định nghĩa lại bộ từ điển Prompt (Dictionary) chi tiết hơn cho 5 lớp.
+
+---
+Đây là phương pháp **"Chia để trị"**, giúp tận dụng tối đa sức mạnh của CLIP mà không cần can thiệp phức tạp vào kiến trúc mạng Neural (như HiCroPL gốc), đảm bảo tính ổn định và dễ triển khai.
