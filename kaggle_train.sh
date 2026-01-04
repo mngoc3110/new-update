@@ -7,11 +7,11 @@ pip install git+https://github.com/openai/CLIP.git
 pip install imbalanced-learn
 
 # Experiment Name
-EXP="Kaggle_ViTB32_LiteHiCroPL_4Stage_100Epochs"
+EXP="Kaggle_ViTB32_LiteHiCroPL_4Stage_ConsLoss_100Epochs"
 OUT="outputs/${EXP}-$(date +%m-%d-%H%M)"
 mkdir -p "${OUT}"
 
-echo "Starting Stable Training on Kaggle: ViT-B/32 + Lite-HiCroPL + 4-Stage Smart Push"
+echo "Starting Stable Training on Kaggle: ViT-B/32 + Lite-HiCroPL + Consistency Loss + 4-Stage Strategy"
 
 # --- PATH CONFIGURATION ---
 # Adjust these paths if your Kaggle dataset structure is different
