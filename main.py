@@ -94,6 +94,7 @@ model_group.add_argument('--use-hierarchical-prompt', type=str, default='False',
 loss_group = parser.add_argument_group('Loss & Regularization', 'Hyperparameters for loss functions and regularization')
 loss_group.add_argument('--lambda-mi', type=float, default=1.0, help='Weight for Mutual Information (MI) loss.')
 loss_group.add_argument('--lambda-dc', type=float, default=1.0, help='Weight for Distance Correlation (DC) loss.')
+loss_group.add_argument('--lambda-cons', type=float, default=0.0, help='Weight for Consistency Loss (KL Divergence).')
 loss_group.add_argument('--mi-warmup', type=int, default=0, help='Epochs to warmup MI loss.')
 loss_group.add_argument('--mi-ramp', type=int, default=0, help='Epochs to ramp up MI loss.')
 loss_group.add_argument('--dc-warmup', type=int, default=0, help='Epochs to warmup DC loss.')
