@@ -347,6 +347,85 @@ def run_training(args: argparse.Namespace) -> None:
         # Otherwise, manually set best_uar/best_war from loaded checkpoint if needed.
         pass # The recorder from checkpoint is now active.
 
+    # --- RESUME LOGIC: Set correct stage parameters based on start_epoch ---
+    if not use_baseline and start_epoch > 0:
+        print(f"=> Resuming at Epoch {start_epoch}. Setting correct Stage parameters...")
+        
+        # Check which stage we are in and apply ALL settings for that stage immediately
+        
+        # STAGE 4 CONFIG
+        if start_epoch >= args.stage3_epochs:
+            print(f"   [Resume] Applying STAGE 4 Config (Cooldown).")
+            args.logit_adjust_tau = args.stage4_logit_adjust_tau
+            args.stage2_max_class_weight = args.stage4_max_class_weight
+            train_loader, val_loader, test_loader_final = build_dataloaders(args, use_weighted_sampler=True)
+            criterion.logit_adjust_tau = args.logit_adjust_tau
+            # Weights OFF/Reduced? Original code doesn't explicitly turn weights OFF in Stage 4, 
+            # but implied "Reducing WeightedRandomSampler". 
+            # Looking at original logic: Stage 4 just updates tau and max_class_weight for sampler.
+            # It DOES NOT seem to calculate new class_weights for the Loss function itself in the original transition code?
+            # Wait, Stage 3 transition calculated weights. Stage 4 transition just printed "Weights: Still OFF" (which was a comment in my thought, but let's check code).
+            # In original code:
+            # Stage 4 block:
+            #   args.stage2_max_class_weight = args.stage4_max_class_weight
+            #   build_dataloaders(..., use_weighted_sampler=True)
+            #   criterion.logit_adjust_tau = ...
+            #   (No criterion.class_weights update).
+            # So it inherits Stage 3's weights? No, "Weights: Still OFF" comment suggests something else.
+            # Let's look at Stage 3 block in original code:
+            #   args.class_weights = calculate_weights(...)
+            #   criterion.class_weights = ...
+            # So Stage 3 has weights. Stage 4 inherits them unless reset.
+            # However, to be safe and match the "Transition" logic exactly, we should apply what the transition applies.
+            
+        # STAGE 3 CONFIG
+        elif start_epoch >= args.stage2_epochs:
+            print(f"   [Resume] Applying STAGE 3 Config (Aggressive Push).")
+            args.logit_adjust_tau = args.stage3_logit_adjust_tau
+            args.smoothing_temp = args.stage3_smoothing_temp
+            
+            args.stage2_max_class_weight = args.stage3_max_class_weight
+            train_loader, val_loader, test_loader_final = build_dataloaders(args, use_weighted_sampler=True)
+            
+            if class_counts is not None:
+                args.class_weights = calculate_weights(class_counts, args.stage3_max_class_weight)
+                new_weights = torch.tensor(args.class_weights, dtype=torch.float32).to(args.device)
+                criterion.class_weights = new_weights
+                if criterion.ce_loss is not None:
+                    criterion.ce_loss.weight = new_weights
+            
+            criterion.logit_adjust_tau = args.logit_adjust_tau
+            criterion.smoothing_temp = args.smoothing_temp
+
+        # STAGE 2 CONFIG
+        elif start_epoch >= args.stage1_epochs:
+            print(f"   [Resume] Applying STAGE 2 Config (Double Re-Weighting).")
+            args.logit_adjust_tau = args.stage2_logit_adjust_tau
+            args.smoothing_temp = args.stage2_smoothing_temp
+            args.label_smoothing = args.stage2_label_smoothing
+            
+            train_loader, val_loader, test_loader_final = build_dataloaders(args, use_weighted_sampler=True)
+            
+            if class_counts is not None:
+                args.class_weights = calculate_weights(class_counts, args.stage2_max_class_weight)
+                new_weights = torch.tensor(args.class_weights, dtype=torch.float32).to(args.device)
+                criterion.class_weights = new_weights
+                if criterion.ce_loss is not None:
+                    criterion.ce_loss.weight = new_weights
+                    criterion.ce_loss.label_smoothing = args.label_smoothing
+
+            criterion.lambda_mi = original_lambda_mi
+            criterion.lambda_dc = original_lambda_dc
+            criterion.logit_adjust_tau = args.logit_adjust_tau
+            criterion.smoothing_temp = args.smoothing_temp
+            criterion.label_smoothing = args.label_smoothing
+            
+            # Ensure Priors
+            if criterion.class_priors is None and class_counts is not None:
+                counts_t = torch.tensor(class_counts, dtype=torch.float32).to(args.device)
+                priors = counts_t / counts_t.sum()
+                criterion.register_buffer("class_priors", priors)
+
     for epoch in range(start_epoch, args.epochs):
         
         # Bypass stage logic if using baseline config
