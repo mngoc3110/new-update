@@ -46,7 +46,7 @@ python main.py \
   --val-annotation "${VAL_TXT}" \
   --test-annotation "${TEST_TXT}" \
   --bounding-box-face "${FACE_BOX}" \
-  --bounding_box-body "${BODY_BOX}" \
+  --bounding-box-body "${BODY_BOX}" \
   \
   --clip-path "${CLIP_PATH}" \
   --text-type class_descriptor \
