@@ -8,7 +8,7 @@ pip install imbalanced-learn
 
 # --- RESUME CONFIGURATION ---
 # Experiment Name (Appended "-Resumed" to distinguish)
-EXP="Kaggle_ViTB32_LiteHiCroPL_4Stage_SmartPush_100Epochs-Resumed"
+EXP="Kaggle_ViTB32_LiteHiCroPL_4Stage_SmartPush_100Epochs-Resumed-STAGE3_EXTENDED"
 OUT="outputs/${EXP}-$(date +%m-%d-%H%M)"
 mkdir -p "${OUT}"
 
