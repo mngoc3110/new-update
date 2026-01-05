@@ -1,12 +1,17 @@
 #!/bin/bash
 set -e
 
-# Experiment Name: ViTB32 + Focal + StrongHead + StrongerSemanticSemanticSmoothing
-EXP="ViTB32_LiteHiCroPL_4Stage_BalancedPush_100Epochs"
+# --- RESUME CONFIGURATION ---
+# Experiment Name (Keep same or append "-Resumed")
+EXP="ViTB32_LiteHiCroPL_4Stage_BalancedPush_100Epochs-Resumed"
 OUT="outputs/${EXP}-$(date +%m-%d-%H%M)"
 mkdir -p "${OUT}"
 
-echo "Starting Stable Training: ViT-B/32 + Lite-HiCroPL + 4-Stage Balanced Push (100 Epochs)"
+# Path to the checkpoint you want to resume from
+# CHECKPOINT_PATH="outputs/ViTB32_LiteHiCroPL_4Stage_BalancedPush_100Epochs-[01-04]-[19:37]/model.pth"
+CHECKPOINT_PATH="outputs/ViTB32_LiteHiCroPL_4Stage_BalancedPush_100Epochs-[01-04]-[19:37]/model_best.pth"
+
+echo "Resuming Training from: ${CHECKPOINT_PATH}"
 
 python main.py \
   --mode train \
@@ -15,6 +20,7 @@ python main.py \
   --seed 42 \
   --workers 4 \
   --print-freq 10 \
+  --resume "${CHECKPOINT_PATH}" \
   \
   --root-dir ./ \
   --train-annotation RAER/annotation/train_80.txt \
@@ -70,8 +76,3 @@ python main.py \
   --stage4-logit-adjust-tau 0.1 \
   --stage4-max-class-weight 1.2
 
-# 4-Stage "Balanced Push" Strategy with Lite-HiCroPL:
-# Stage 1 (0-5): Warmup.
-# Stage 2 (6-30): Intro Minority (Weight 1.5, Tau 0.2).
-# Stage 3 (31-70): Moderate Push (Weight 3.0, Tau 0.5).
-# Stage 4 (71-100): Gentle Cooldown (Weight 1.2, Tau 0.1). 
