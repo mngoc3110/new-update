@@ -1,4 +1,5 @@
 #!/bin/bash
+# Updated for Kaggle Environment
 set -e
 
 # --- PATH CONFIGURATION ---
