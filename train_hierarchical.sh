@@ -2,6 +2,11 @@
 # Updated for Kaggle Environment
 set -e
 
+# --- SETUP ENVIRONMENT (Kaggle/Colab) ---
+echo "=> Installing dependencies..."
+pip install git+https://github.com/openai/CLIP.git
+pip install imbalanced-learn
+
 # --- PATH CONFIGURATION ---
 # Kaggle Paths (Default)
 ROOT_DIR="/kaggle/input/raer-video-emotion-dataset"
