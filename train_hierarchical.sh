@@ -80,7 +80,7 @@ python main.py \
   --stage3-logit-adjust-tau 0.5 \
   --stage3-max-class-weight 3.0 \
   --stage3-smoothing-temp 0.18 \
-  \  --stage4-logit-adjust-tau 0.1 \
+  --stage4-logit-adjust-tau 0.1 \
   --stage4-max-class-weight 1.2
 
 # Note: Batch size 8 for MPS stability. Increase to 16/32 if on strong GPU.
