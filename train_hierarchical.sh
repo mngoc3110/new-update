@@ -1,6 +1,17 @@
 #!/bin/bash
 set -e
 
+# --- PATH CONFIGURATION ---
+# Default to local development paths
+ROOT_DIR="./"
+ANNOT_DIR="RAER/annotation"
+BOX_DIR="RAER/bounding_box"
+
+# Uncomment these lines if running on Kaggle and datasets are mounted as specified
+# ROOT_DIR="/kaggle/input/raer-video-emotion-dataset"
+# ANNOT_DIR="/kaggle/input/raer-annot/annotation" # Assuming annotations are in a separate dataset
+# BOX_DIR="${ROOT_DIR}/RAER/bounding_box"
+
 # Experiment Name: Hierarchical (Binary Head) + LiteHiCroPL + 4-Stage
 EXP="Hierarchical_ViTB32_LiteHiCroPL_4Stage_BalancedPush_100Epochs"
 OUT="outputs/${EXP}-$(date +%m-%d-%H%M)"
@@ -11,17 +22,17 @@ echo "Starting Hierarchical Training: Neutral vs Non-Neutral + 5-Class Classific
 python main.py \
   --mode train \
   --exper-name "${EXP}" \
-  --gpu mps \
+  --gpu 0 \
   --seed 42 \
   --workers 4 \
   --print-freq 10 \
   \
-  --root-dir ./ \
-  --train-annotation RAER/annotation/train_80.txt \
-  --val-annotation RAER/annotation/val_20.txt \
-  --test-annotation RAER/annotation/test.txt \
-  --bounding-box-face RAER/bounding_box/face.json \
-  --bounding-box-body RAER/bounding_box/body.json \
+  --root-dir "${ROOT_DIR}" \
+  --train-annotation "${ANNOT_DIR}/train_80.txt" \
+  --val-annotation "${ANNOT_DIR}/val_20.txt" \
+  --test-annotation "${ANNOT_DIR}/test.txt" \
+  --bounding-box-face "${BOX_DIR}/face.json" \
+  --bounding-box-body "${BOX_DIR}/body.json" \
   \
   --clip-path ViT-B/32 \
   --text-type class_descriptor \
@@ -68,8 +79,7 @@ python main.py \
   --stage3-logit-adjust-tau 0.5 \
   --stage3-max-class-weight 3.0 \
   --stage3-smoothing-temp 0.18 \
-  \
-  --stage4-logit-adjust-tau 0.1 \
+  \  --stage4-logit-adjust-tau 0.1 \
   --stage4-max-class-weight 1.2
 
 # Note: Batch size 8 for MPS stability. Increase to 16/32 if on strong GPU.
