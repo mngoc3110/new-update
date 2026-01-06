@@ -51,7 +51,7 @@ python main.py \
   --use-hierarchical-prompt True \
   \
   --epochs 100 \
-  --batch-size 32 \
+  --batch-size 16 \
   \
   --lr 1e-3 \
   --lr-image-encoder 1e-6 \
