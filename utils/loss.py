@@ -121,6 +121,7 @@ class CLIPCAERLoss(nn.Module):
         self.lambda_mi = float(getattr(args, "lambda_mi", 1.0))
         self.lambda_dc = float(getattr(args, "lambda_dc", 0.0))
         self.lambda_cons = float(getattr(args, "lambda_cons", 0.0)) # New Consistency Loss weight
+        self.lambda_binary = float(getattr(args, "lambda_binary", 1.0)) # Hierarchical Binary Loss weight
 
         # warmup/ramp
         self.mi_warmup = int(getattr(args, "mi_warmup", 0))
@@ -177,6 +178,10 @@ class CLIPCAERLoss(nn.Module):
                     weight=self.class_weights,
                     label_smoothing=self.label_smoothing,
                 )
+        
+        # ✅ Hierarchical Binary Loss (Neutral vs Non-Neutral)
+        # We can use standard CE or weighted CE if dataset is skewed (Neutral >> Others)
+        self.binary_loss = nn.CrossEntropyLoss() 
 
         # cache weights for printing (trainer có thể đọc)
         self.last_w_mi = 0.0
@@ -324,6 +329,7 @@ class CLIPCAERLoss(nn.Module):
         learnable_text_features=None,
         hand_crafted_text_features=None,
         logits_hand=None,             # handcrafted logits [B,C]
+        logits_binary=None,           # ✅ binary logits [B,2]
     ):
         if epoch is not None:
             self.set_epoch(int(epoch))
@@ -341,6 +347,13 @@ class CLIPCAERLoss(nn.Module):
         # Calculate consistency BEFORE Logit Adjustment to preserve raw knowledge
         cons_loss = self._consistency_loss(logits, logits_hand) * self.lambda_cons
         
+        # --- Hierarchical Binary Loss (New) ---
+        binary_loss = torch.tensor(0.0, device=logits.device)
+        if logits_binary is not None:
+            # Create binary targets: 0 if Neutral (class 0), 1 if Others (class 1-4)
+            targets_binary = (targets > 0).long()
+            binary_loss = self.binary_loss(logits_binary, targets_binary) * self.lambda_binary
+
         # --- Baseline LSR2 Path (NEW) ---
         if self.lsr2_loss is not None:
             # Use LSR2 (Label Smoothing Regularization 2 with custom weights)
@@ -352,7 +365,7 @@ class CLIPCAERLoss(nn.Module):
             
             # Note: Baseline usually doesn't have MI/DC/Cons, but we can keep them 
             # if args are set (e.g. lambda_cons=0.1).
-            total = ce + self.last_w_mi * mi + self.last_w_dc * dc + cons_loss
+            total = ce + self.last_w_mi * mi + self.last_w_dc * dc + cons_loss + binary_loss
             
             return {
                 "total": total,
@@ -360,6 +373,7 @@ class CLIPCAERLoss(nn.Module):
                 "mi": mi,
                 "dc": dc,
                 "cons": cons_loss,
+                "binary": binary_loss,
                 "w_mi": float(self.last_w_mi),
                 "w_dc": float(self.last_w_dc),
             }
@@ -411,7 +425,7 @@ class CLIPCAERLoss(nn.Module):
         mi = self._mi_loss(learnable_text_features, hand_crafted_text_features)
         dc = self._dc_loss(logits, logits_hand)
 
-        total = ce + self.last_w_mi * mi + self.last_w_dc * dc + cons_loss
+        total = ce + self.last_w_mi * mi + self.last_w_dc * dc + cons_loss + binary_loss
 
         return {
             "total": total,
@@ -419,6 +433,7 @@ class CLIPCAERLoss(nn.Module):
             "mi": mi,
             "dc": dc,
             "cons": cons_loss, # Add to return dict
+            "binary": binary_loss, # ✅ Return binary loss
             "w_mi": float(self.last_w_mi),
             "w_dc": float(self.last_w_dc),
         }

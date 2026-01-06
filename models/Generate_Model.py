@@ -147,6 +147,10 @@ class GenerateModel(nn.Module):
             getattr(args, "lambda_dc", 0.0) > 0.0
         )
 
+        # ✅ Hierarchical Learning: Binary Head (Neutral vs. Others)
+        # Input: 512 (video_features), Output: 2
+        self.binary_head = nn.Linear(512, 2)
+
     def forward(self, image_face, image_body, return_dict: bool = True):
         ################# Visual Part #################
         # Face
@@ -179,6 +183,9 @@ class GenerateModel(nn.Module):
         
         # L2 Norm
         video_features = video_features / (video_features.norm(dim=-1, keepdim=True) + 1e-6)
+
+        ################# Binary Head Output #################
+        logits_binary = self.binary_head(video_features) # [B, 2]
 
         ################# Text Part (Dual View) #################
         # 1) Learnable prompts (ALWAYS needed for classification)
@@ -266,6 +273,7 @@ class GenerateModel(nn.Module):
             "logits": logits_learnable,                  
             "logits_learnable": logits_learnable,
             "logits_hand": logits_hand,
+            "logits_binary": logits_binary, # ✅ Added binary logits
             "probs_learnable": probs_learnable,
             "probs_hand": probs_hand,
             "video_features": video_features,

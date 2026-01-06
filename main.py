@@ -42,6 +42,7 @@ exp_group.add_argument('--mode', type=str, default='train', choices=['train', 'e
                        help="Execution mode: 'train' for a full training run, 'eval' for evaluation only.")
 exp_group.add_argument('--eval-checkpoint', type=str, default='/media/D/zlm/code/CLIP_CAER/outputs_1/test-[07-09]-[22:24]/model_best.pth',
                        help="Path to the model checkpoint for evaluation mode (e.g., outputs/exp_name/model_best.pth).")
+exp_group.add_argument('--inference-threshold-binary', type=float, default=-1.0, help='Threshold for Binary Head (Neutral vs Non-Neutral). If Prob(Non-Neutral) < threshold, predict Neutral. Set to -1.0 to disable.')
 exp_group.add_argument('--exper-name', type=str, default='test', help='A name for the experiment to create a unique output folder.')
 exp_group.add_argument('--dataset', type=str, default='RAER', help='Name of the dataset to use.')
 exp_group.add_argument('--gpu', type=str, default='mps', help='ID of the GPU to use, or "mps"/"cpu".')
@@ -66,6 +67,7 @@ train_group.add_argument('--epochs', type=int, default=20, help='Total number of
 train_group.add_argument('--batch-size', type=int, default=8, help='Batch size for training and validation.')
 train_group.add_argument('--print-freq', type=int, default=10, help='Frequency of printing training logs.')
 train_group.add_argument('--use-baseline-config', type=str, default='False', choices=['True', 'False'], help='Use the simple, high-LR baseline configuration (no complex re-balancing).')
+train_group.add_argument('--distraction-boost', type=float, default=1.0, help='Multiplier to boost the class weight of Distraction (Class 4).')
 
 # --- Optimizer & Learning Rate ---
 optim_group = parser.add_argument_group('Optimizer & LR', 'Hyperparameters for the optimizer and scheduler')
@@ -98,6 +100,7 @@ loss_group.add_argument('--use-lsr2-loss', type=str, default='False', choices=['
 loss_group.add_argument('--lambda-mi', type=float, default=1.0, help='Weight for Mutual Information (MI) loss.')
 loss_group.add_argument('--lambda-dc', type=float, default=1.0, help='Weight for Distance Correlation (DC) loss.')
 loss_group.add_argument('--lambda-cons', type=float, default=0.0, help='Weight for Consistency Loss (KL Divergence).')
+loss_group.add_argument('--lambda-binary', type=float, default=1.0, help='Weight for Hierarchical Binary Loss (Neutral vs Non-Neutral).') # New
 loss_group.add_argument('--mi-warmup', type=int, default=0, help='Epochs to warmup MI loss.')
 loss_group.add_argument('--mi-ramp', type=int, default=0, help='Epochs to ramp up MI loss.')
 loss_group.add_argument('--dc-warmup', type=int, default=0, help='Epochs to warmup DC loss.')
@@ -192,7 +195,7 @@ def setup_paths_and_logging(args: argparse.Namespace) -> argparse.Namespace:
         
     return args
 
-def calculate_weights(class_counts, max_weight):
+def calculate_weights(class_counts, max_weight, distraction_boost=1.0):
     if class_counts is None:
         return None
     total_samples = sum(class_counts)
@@ -201,6 +204,12 @@ def calculate_weights(class_counts, max_weight):
     weights = total_samples / (num_classes * (class_counts + 1e-6))
     # Clip
     weights = np.clip(weights, a_min=None, a_max=max_weight)
+    
+    # Apply Distraction Boost (assuming Distraction is index 4 - Class 5)
+    if num_classes > 4 and distraction_boost > 1.0:
+        weights[4] *= distraction_boost
+        print(f"   >>> Applying Distraction Boost (x{distraction_boost}) -> New Distraction Weight: {weights[4]:.4f}")
+        
     return weights.tolist()
 
 # ==================== Training Function ====================
@@ -313,7 +322,8 @@ def run_training(args: argparse.Namespace) -> None:
         {"params": model.temporal_net_body.parameters(), "lr": args.lr},
         {"params": model.image_encoder.parameters(), "lr": args.lr_image_encoder},
         {"params": model.prompt_learner.parameters(), "lr": args.lr_prompt_learner},
-        {"params": model.project_fc.parameters(), "lr": args.lr_image_encoder}
+        {"params": model.project_fc.parameters(), "lr": args.lr_image_encoder},
+        {"params": model.binary_head.parameters(), "lr": args.lr} # ✅ Added binary head to optimizer
     ], momentum=args.momentum, weight_decay=args.weight_decay)
 
     # Load optimizer state from checkpoint if resuming
@@ -337,7 +347,8 @@ def run_training(args: argparse.Namespace) -> None:
         use_amp=(args.use_amp == 'True'), 
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         log_txt_path=log_txt_path,
-        class_names=class_names
+        class_names=class_names,
+        inference_threshold_binary=args.inference_threshold_binary # Pass the new argument
     )
     
     # Re-evaluate start_epoch and best_uar/best_war if recorder was loaded.
@@ -601,7 +612,8 @@ def run_training(args: argparse.Namespace) -> None:
         class_names=class_names,
         log_confusion_matrix_path=log_confusion_matrix_path,
         log_txt_path=log_txt_path,
-        title=f"Confusion Matrix on {args.dataset} (Final Test Set)"
+        title=f"Confusion Matrix on {args.dataset} (Final Test Set)",
+        inference_threshold_binary=args.inference_threshold_binary # Pass the threshold
     )
 
 def run_eval(args: argparse.Namespace) -> None:
@@ -622,13 +634,14 @@ def run_eval(args: argparse.Namespace) -> None:
 
     # Run evaluation
     computer_uar_war(
-        val_loader=test_loader_final,
+        test_loader=test_loader_final,
         model=model,
         device=args.device,
         class_names=class_names, # Pass class_names
         log_txt_path=log_txt_path,
         log_confusion_matrix_path=log_confusion_matrix_path, # Pass log_confusion_matrix_path
-        title=f"Confusion Matrix on {args.dataset} (Final Test Set)"
+        title=f"Confusion Matrix on {args.dataset} (Final Test Set)",
+        inference_threshold_binary=args.inference_threshold_binary # Pass the threshold
     )
     print("=> Evaluation complete.")
 

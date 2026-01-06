@@ -143,6 +143,9 @@ def computer_uar_war(
     class_names=None,
     desc="METRICS",
     log_txt_path: Optional[str] = None,
+    log_confusion_matrix_path: Optional[str] = None,
+    title: str = "Confusion Matrix",
+    inference_threshold_binary: float = -1.0, # Renamed parameter
 ):
     """
     TRAIN / TEST ONLY.
@@ -173,14 +176,48 @@ def computer_uar_war(
         target = target.to(device, non_blocking=True)
 
         out = model(images_face, images_body)
-        logits = _unwrap_logits(out)
+        
+        # Handle dict output from Hierarchical Model
+        if isinstance(out, dict):
+            logits = out["logits"]
+            logits_binary = out.get("logits_binary", None)
+        else:
+            logits = _unwrap_logits(out)
+            logits_binary = None
 
-        preds = torch.argmax(logits, dim=1)
+        preds_main = torch.argmax(logits, dim=1)
+
+        # Hierarchical Inference Logic
+        if inference_threshold_binary > 0 and logits_binary is not None:
+            probs_binary = torch.softmax(logits_binary, dim=1)
+            # Probability of being Non-Neutral (Class 1)
+            prob_non_neutral = probs_binary[:, 1]
+            
+            # If prob(non-neutral) < threshold -> Force Neutral (0)
+            preds = torch.where(
+                prob_non_neutral >= inference_threshold_binary, 
+                preds_main, 
+                torch.tensor(0, device=device)
+            )
+        # Fallback to old logic if no binary head but threshold is set (less likely now but safe)
+        elif inference_threshold_binary > 0 and logits_binary is None:
+             probs = torch.softmax(logits, dim=1)
+             non_neutral_probs = probs[:, 1:]
+             max_non_neutral_prob, max_non_neutral_idx = torch.max(non_neutral_probs, dim=1)
+             adjusted_preds = max_non_neutral_idx + 1
+             preds = torch.where(max_non_neutral_prob >= inference_threshold_binary, adjusted_preds, torch.tensor(0, device=device))
+        else:
+            preds = preds_main
+            
         all_preds.append(preds.detach().cpu())
         all_targets.append(target.detach().cpu())
 
     all_preds = torch.cat(all_preds).numpy()
     all_targets = torch.cat(all_targets).numpy()
+
+    # DEBUG: Print unique values to debug "Number of classes mismatch" error
+    # print(f"[DEBUG] Unique Targets: {np.unique(all_targets)}")
+    # print(f"[DEBUG] Unique Preds: {np.unique(all_preds)}")
 
     cm = confusion_matrix(all_targets, all_preds)
 

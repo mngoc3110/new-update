@@ -9,7 +9,7 @@ from utils.utils import AverageMeter, ProgressMeter
 class Trainer:
     def __init__(self, model, criterion, optimizer, scheduler, device,
                  use_amp=True, gradient_accumulation_steps=1, grad_clip_norm=1.0,
-                 class_names=None, log_txt_path=None):
+                 class_names=None, log_txt_path=None, inference_threshold_binary=-1.0):
         self.model = model
         self.criterion = criterion
         self.optimizer = optimizer
@@ -22,13 +22,16 @@ class Trainer:
 
         self.class_names = class_names
         self.log_txt_path = log_txt_path
+        # Threshold for Binary Head (Hierarchical Inference)
+        # If prob(Non-Neutral) < threshold -> Predict Neutral
+        self.inference_threshold_binary = inference_threshold_binary
 
         # ✅ AMP: chỉ bật khi CUDA (MPS float16 dễ NaN)
         self.use_amp = bool(use_amp) and (self.device.type == "cuda")
         is_cuda = self.device.type == "cuda"
         self.scaler = torch.amp.GradScaler('cuda', enabled=self.use_amp)
 
-        print(f"Trainer initialized: device={self.device.type} | amp={self.use_amp} | accum={self.accumulation_steps} | clip={self.grad_clip_norm}")
+        print(f"Trainer initialized: device={self.device.type} | amp={self.use_amp} | accum={self.accumulation_steps} | clip={self.grad_clip_norm} | bin_thresh={self.inference_threshold_binary}")
 
     def _log(self, msg: str):
         logging.info(msg)
@@ -66,6 +69,9 @@ class Trainer:
                 with torch.amp.autocast(device_type='cuda', dtype=torch.float16, enabled=self.use_amp):
                     out = self.model(images_face, images_body)
                     logits = out["logits"] if isinstance(out, dict) else out
+                    
+                    # Get Binary Logits if available
+                    logits_binary = out.get("logits_binary") if isinstance(out, dict) else None
 
                     # epoch int cho warmup/ramp
                     try:
@@ -78,6 +84,7 @@ class Trainer:
                         learnable_text_features=(out.get("learnable_text_features") if isinstance(out, dict) else None),
                         hand_crafted_text_features=(out.get("hand_crafted_text_features") if isinstance(out, dict) else None),
                         logits_hand=(out.get("logits_hand") if isinstance(out, dict) else None),
+                        logits_binary=logits_binary # Pass to criterion for Hierarchical Loss
                     )
                     loss = loss_dict["total"]
 
@@ -124,7 +131,24 @@ class Trainer:
 
                         self.optimizer.zero_grad(set_to_none=True)
 
-                preds = logits.argmax(dim=1)
+                # --- Inference Logic ---
+                preds_main = logits.argmax(dim=1)
+                
+                # Hierarchical Inference (Valid/Test Only)
+                if not is_train and self.inference_threshold_binary > 0 and logits_binary is not None:
+                    # Calculate Prob of "Non-Neutral" (Class 1)
+                    prob_binary = torch.softmax(logits_binary, dim=1)[:, 1]
+                    
+                    # If Prob(Non-Neutral) < Threshold -> Force Neutral (0)
+                    # Else -> Keep Main Prediction
+                    preds = torch.where(
+                        prob_binary >= self.inference_threshold_binary, 
+                        preds_main, 
+                        torch.tensor(0, device=self.device)
+                    )
+                else:
+                    preds = preds_main
+
                 correct = preds.eq(target).sum().item()
                 acc = (correct / target.size(0)) * 100.0
 
