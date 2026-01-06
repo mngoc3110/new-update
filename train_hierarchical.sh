@@ -2,15 +2,15 @@
 set -e
 
 # --- PATH CONFIGURATION ---
-# Default to local development paths
-ROOT_DIR="./"
-ANNOT_DIR="RAER/annotation"
-BOX_DIR="RAER/bounding_box"
+# Kaggle Paths (Default)
+ROOT_DIR="/kaggle/input/raer-video-emotion-dataset"
+ANNOT_DIR="/kaggle/input/raer-annot/annotation"
+BOX_DIR="${ROOT_DIR}/RAER/bounding_box"
 
-# Uncomment these lines if running on Kaggle and datasets are mounted as specified
-# ROOT_DIR="/kaggle/input/raer-video-emotion-dataset"
-# ANNOT_DIR="/kaggle/input/raer-annot/annotation" # Assuming annotations are in a separate dataset
-# BOX_DIR="${ROOT_DIR}/RAER/bounding_box"
+# Local Paths (Commented out)
+# ROOT_DIR="./"
+# ANNOT_DIR="RAER/annotation"
+# BOX_DIR="RAER/bounding_box"
 
 # Experiment Name: Hierarchical (Binary Head) + LiteHiCroPL + 4-Stage
 EXP="Hierarchical_ViTB32_LiteHiCroPL_4Stage_BalancedPush_100Epochs"
