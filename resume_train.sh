@@ -3,7 +3,7 @@
 set -e
 
 # --- SETUP ENVIRONMENT (Kaggle/Colab) ---
-echo "=> Installing dependencies..."
+ echo "=> Installing dependencies..."
 pip install git+https://github.com/openai/CLIP.git
 pip install imbalanced-learn
 
@@ -17,19 +17,11 @@ BOX_DIR="${ROOT_DIR}/RAER/bounding_box"
 # Original experiment name
 ORIGINAL_EXP="Hierarchical_ViTB32_LiteHiCroPL_4Stage_BalancedPush_100Epochs"
 
-# Output directory for the RESUMED run
-# This will create a new directory to store logs and checkpoints of the resumed training
-RESUMED_OUT="outputs/${ORIGINAL_EXP}-Resumed-$(date +%m-%d-%H%M)"
-mkdir -p "${RESUMED_OUT}"
-
 # Path to the specific checkpoint to resume from.
-# Ensure this path is correct for your setup.
-# The user specified the model was saved at 'outputs/Hierarchical_ViTB32_LiteHiCroPL_4Stage_BalancedPush_100Epochs-[01-06]-[18:25]'
-# And we are resuming from epoch 68.
-CHECKPOINT_TO_RESUME="outputs/Hierarchical_ViTB32_LiteHiCroPL_4Stage_BalancedPush_100Epochs-[01-06]-[18:25]/checkpoint_68.pth"
+# THIS PATH HAS BEEN UPDATED TO YOUR KAGGLE DATASET PATH.
+CHECKPOINT_TO_RESUME="/kaggle/input/hierarchical-vitb32-0-68/Hierarchical_ViTB32_LiteHiCroPL_4Stage_BalancedPush_100Epochs/model.pth"
 
 echo "Resuming Hierarchical Training from: ${CHECKPOINT_TO_RESUME}"
-echo "Outputs will be saved to: ${RESUMED_OUT}"
 
 python main.py \
   --mode train \
@@ -95,6 +87,4 @@ python main.py \
   --stage4-logit-adjust-tau 0.1 \
   --stage4-max-class-weight 1.2 \
   \
-  --resume "${CHECKPOINT_TO_RESUME}" \
-  --output_dir "${RESUMED_OUT}" \
-  --initial-stage 3
+  --resume "${CHECKPOINT_TO_RESUME}"
