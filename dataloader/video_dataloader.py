@@ -30,7 +30,7 @@ class VideoRecord(object):
         return int(self._data[2])
 
 class VideoDataset(data.Dataset):
-    def __init__(self, list_file, num_segments, duration, mode, transform, image_size, bounding_box_face, bounding_box_body, root_dir, data_percentage: float = 1.0):
+    def __init__(self, list_file, num_segments, duration, mode, transform, image_size, bounding_box_face, bounding_box_body, root_dir, data_percentage: float = 1.0, binary_classification: bool = False, emotional_only: bool = False):
         self.list_file = list_file
         self.duration = duration
         self.num_segments = num_segments
@@ -41,6 +41,8 @@ class VideoDataset(data.Dataset):
         self.bounding_box_body = bounding_box_body
         self.root_dir = root_dir  # Store root_dir
         self.data_percentage = data_percentage # Store data_percentage
+        self.binary_classification = binary_classification
+        self.emotional_only = emotional_only
         self._read_sample()
         self._parse_list()
         
@@ -122,7 +124,18 @@ class VideoDataset(data.Dataset):
         #
         # Data Form: [video_id, num_frames, class_idx]
         #
-        self.video_list = [VideoRecord(item) for item in self.sample_list]  
+        self.video_list = [VideoRecord(item) for item in self.sample_list]
+
+        if self.emotional_only:
+            print("   [Dataloader] Filtering for emotional classes only...")
+            original_len = len(self.video_list)
+            self.video_list = [record for record in self.video_list if record.label != 1] # Assuming Neutral is label 1
+            print(f"   [Dataloader] {len(self.video_list)}/{original_len} samples remaining.")
+            
+            # Remap labels from [2,3,4,5] to [0,1,2,3]
+            for record in self.video_list:
+                record._data[2] = str(int(record._data[2]) - 2)
+        
         print(('video number:%d' % (len(self.video_list))))
 
     def _get_train_indices(self, record):
@@ -253,6 +266,9 @@ class VideoDataset(data.Dataset):
             print(f"DEBUG: Invalid target label {target_label} for record {record.path}. Clamping to [0,4].")
             target_label = max(0, min(4, target_label)) # Clamp if somehow out of bounds
 
+        if self.binary_classification:
+            target_label = 0 if target_label == 0 else 1
+
         return images_face,images,target_label
 
     def __len__(self):
@@ -264,7 +280,7 @@ def collate_fn_ignore_none(batch):
         return torch.tensor([]) # Return empty tensor to signal empty batch
     return torch.utils.data.dataloader.default_collate(batch)
 
-def train_data_loader(list_file, num_segments, duration, image_size,dataset_name,bounding_box_face,bounding_box_body, root_dir, data_percentage: float = 1.0):
+def train_data_loader(list_file, num_segments, duration, image_size,dataset_name,bounding_box_face,bounding_box_body, root_dir, data_percentage: float = 1.0, binary_classification: bool = False):
     if dataset_name == "RAER":
          # Reverted to Baseline-style Gentle Augmentation to preserve features and Aspect Ratio
          train_transforms = torchvision.transforms.Compose([
@@ -284,12 +300,13 @@ def train_data_loader(list_file, num_segments, duration, image_size,dataset_name
                               bounding_box_face=bounding_box_face,
                               bounding_box_body=bounding_box_body,
                               root_dir=root_dir,
-                              data_percentage=data_percentage
+                              data_percentage=data_percentage,
+                              binary_classification=binary_classification
                               )
     return train_data, collate_fn_ignore_none
 
 
-def test_data_loader(list_file, num_segments, duration, image_size,bounding_box_face,bounding_box_body, root_dir, data_percentage: float = 1.0):
+def test_data_loader(list_file, num_segments, duration, image_size,bounding_box_face,bounding_box_body, root_dir, data_percentage: float = 1.0, binary_classification: bool = False):
     
     test_transform = torchvision.transforms.Compose([GroupResize(image_size),
                                                      Stack(),
@@ -304,6 +321,7 @@ def test_data_loader(list_file, num_segments, duration, image_size,bounding_box_
                              bounding_box_face=bounding_box_face,
                              bounding_box_body=bounding_box_body,
                              root_dir=root_dir,
-                             data_percentage=data_percentage
+                             data_percentage=data_percentage,
+                             binary_classification=binary_classification
                              )
     return test_data, collate_fn_ignore_none

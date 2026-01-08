@@ -112,76 +112,86 @@ class CLIPCAERLoss(nn.Module):
     - Cons: KL( Learnable || Hand-crafted ) để giữ kiến thức gốc
     """
 
-    def __init__(self, args, mi_estimator=None, num_classes=5):
+    def __init__(self, args, mi_estimator=None, num_classes=5, binary_classification_stage: bool = False):
         super().__init__()
         self.num_classes = int(num_classes)
         self.mi_estimator = mi_estimator
+        self.binary_classification_stage = binary_classification_stage
 
-        # base lambdas (max weight)
-        self.lambda_mi = float(getattr(args, "lambda_mi", 1.0))
-        self.lambda_dc = float(getattr(args, "lambda_dc", 0.0))
-        self.lambda_cons = float(getattr(args, "lambda_cons", 0.0)) # New Consistency Loss weight
-        self.lambda_binary = float(getattr(args, "lambda_binary", 1.0)) # Hierarchical Binary Loss weight
-
-        # warmup/ramp
-        self.mi_warmup = int(getattr(args, "mi_warmup", 0))
-        self.mi_ramp   = int(getattr(args, "mi_ramp", 0))
-        self.dc_warmup = int(getattr(args, "dc_warmup", 0))
-        self.dc_ramp   = int(getattr(args, "dc_ramp", 0))
-
-        # label smoothing
-        self.label_smoothing = float(getattr(args, "label_smoothing", 0.0))
-        self.semantic_smoothing = (str(getattr(args, "semantic_smoothing", "False")) == "True")
-        self.smoothing_temp = float(getattr(args, "smoothing_temp", 0.1))
-
-        # Logit Adjustment (Menon et al., 2020)
-        self.logit_adjust_tau = float(getattr(args, "logit_adjust_tau", 0.0))
-        self.register_buffer("class_priors", None)
-        if hasattr(args, "class_counts") and args.class_counts is not None:
-            counts = torch.tensor(args.class_counts, dtype=torch.float32)
-            priors = counts / counts.sum()
-            self.register_buffer("class_priors", priors)
-
-        # optional class weights (nếu bạn muốn dùng)
-        cw = getattr(args, "class_weights", None)  # list/tuple or None
-        if cw is not None:
-            cw = torch.tensor(cw, dtype=torch.float32)
-        self.register_buffer("class_weights", cw if cw is not None else None)
-        
-        # Focal Loss
-        self.use_focal_loss = (str(getattr(args, "use_focal_loss", "False")) == "True")
-        self.focal_gamma = float(getattr(args, "focal_gamma", 2.0))
-        
-        # Baseline LSR2 Integration
-        self.use_baseline_loss = (str(getattr(args, "use_baseline_config", "False")) == "True")
-        if self.use_baseline_loss:
-            # Use LSR2 directly if baseline config is active
-            # e=0.1 matches baseline smoothing
-            self.lsr2_loss = LSR2(e=0.1, label_mode='soft') 
+        if self.binary_classification_stage:
+            print("   [Loss] Initializing for STAGE 1: Binary Classification Only.")
+            self.ce_loss = nn.BCEWithLogitsLoss()
+            self.lambda_mi = 0.0
+            self.lambda_dc = 0.0
+            self.lambda_cons = 0.0
+            self.lambda_binary = 1.0 # Only the binary loss is active
+            self.binary_loss = nn.BCEWithLogitsLoss()
         else:
-            self.lsr2_loss = None
+            # base lambdas (max weight)
+            self.lambda_mi = float(getattr(args, "lambda_mi", 1.0))
+            self.lambda_dc = float(getattr(args, "lambda_dc", 0.0))
+            self.lambda_cons = float(getattr(args, "lambda_cons", 0.0)) # New Consistency Loss weight
+            self.lambda_binary = float(getattr(args, "lambda_binary", 1.0)) # Hierarchical Binary Loss weight
 
-        if self.semantic_smoothing and self.label_smoothing > 0.0:
-            # If Semantic Smoothing is ON, we use KLDivLoss manually
-            self.ce_loss = None 
-        else:
-            if self.use_focal_loss:
-                # Use Focal Loss
-                self.ce_loss = FocalLoss(
-                    gamma=self.focal_gamma,
-                    alpha=self.class_weights,
-                    label_smoothing=self.label_smoothing
-                )
+            # warmup/ramp
+            self.mi_warmup = int(getattr(args, "mi_warmup", 0))
+            self.mi_ramp   = int(getattr(args, "mi_ramp", 0))
+            self.dc_warmup = int(getattr(args, "dc_warmup", 0))
+            self.dc_ramp   = int(getattr(args, "dc_ramp", 0))
+
+            # label smoothing
+            self.label_smoothing = float(getattr(args, "label_smoothing", 0.0))
+            self.semantic_smoothing = (str(getattr(args, "semantic_smoothing", "False")) == "True")
+            self.smoothing_temp = float(getattr(args, "smoothing_temp", 0.1))
+
+            # Logit Adjustment (Menon et al., 2020)
+            self.logit_adjust_tau = float(getattr(args, "logit_adjust_tau", 0.0))
+            self.register_buffer("class_priors", None)
+            if hasattr(args, "class_counts") and args.class_counts is not None:
+                counts = torch.tensor(args.class_counts, dtype=torch.float32)
+                priors = counts / counts.sum()
+                self.register_buffer("class_priors", priors)
+
+            # optional class weights (nếu bạn muốn dùng)
+            cw = getattr(args, "class_weights", None)  # list/tuple or None
+            if cw is not None:
+                cw = torch.tensor(cw, dtype=torch.float32)
+            self.register_buffer("class_weights", cw if cw is not None else None)
+            
+            # Focal Loss
+            self.use_focal_loss = (str(getattr(args, "use_focal_loss", "False")) == "True")
+            self.focal_gamma = float(getattr(args, "focal_gamma", 2.0))
+            
+            # Baseline LSR2 Integration
+            self.use_baseline_loss = (str(getattr(args, "use_baseline_config", "False")) == "True")
+            if self.use_baseline_loss:
+                # Use LSR2 directly if baseline config is active
+                # e=0.1 matches baseline smoothing
+                self.lsr2_loss = LSR2(e=0.1, label_mode='soft') 
             else:
-                # Standard CE (with or without uniform smoothing)
-                self.ce_loss = nn.CrossEntropyLoss(
-                    weight=self.class_weights,
-                    label_smoothing=self.label_smoothing,
-                )
-        
-        # ✅ Hierarchical Binary Loss (Neutral vs Non-Neutral)
-        # We can use standard CE or weighted CE if dataset is skewed (Neutral >> Others)
-        self.binary_loss = nn.CrossEntropyLoss() 
+                self.lsr2_loss = None
+
+            if self.semantic_smoothing and self.label_smoothing > 0.0:
+                # If Semantic Smoothing is ON, we use KLDivLoss manually
+                self.ce_loss = None 
+            else:
+                if self.use_focal_loss:
+                    # Use Focal Loss
+                    self.ce_loss = FocalLoss(
+                        gamma=self.focal_gamma,
+                        alpha=self.class_weights,
+                        label_smoothing=self.label_smoothing
+                    )
+                else:
+                    # Standard CE (with or without uniform smoothing)
+                    self.ce_loss = nn.CrossEntropyLoss(
+                        weight=self.class_weights,
+                        label_smoothing=self.label_smoothing,
+                    )
+            
+            # ✅ Hierarchical Binary Loss (Neutral vs Non-Neutral)
+            # We can use standard CE or weighted CE if dataset is skewed (Neutral >> Others)
+            self.binary_loss = nn.CrossEntropyLoss() 
 
         # cache weights for printing (trainer có thể đọc)
         self.last_w_mi = 0.0
@@ -334,6 +344,13 @@ class CLIPCAERLoss(nn.Module):
         if epoch is not None:
             self.set_epoch(int(epoch))
 
+        if self.binary_classification_stage:
+            # Stage 1: Binary Classification
+            targets_binary = (targets > 0).float() # 0 for Neutral, 1 for Non-Neutral
+            # We use logits_binary here, not logits
+            binary_loss = self.binary_loss(logits_binary.squeeze(), targets_binary)
+            return { "total": binary_loss, "ce": binary_loss, "mi": 0, "dc": 0, "cons": 0, "binary": binary_loss, "w_mi": 0, "w_dc": 0 }
+
         targets = self._sanitize_targets(targets)
         
         # --- Logit Clamping (Safety) ---
@@ -439,5 +456,5 @@ class CLIPCAERLoss(nn.Module):
         }
 
 
-def build_criterion(args, mi_estimator=None, num_classes=5):
-    return CLIPCAERLoss(args, mi_estimator=mi_estimator, num_classes=num_classes)
+def build_criterion(args, mi_estimator=None, num_classes=5, binary_classification_stage: bool = False):
+    return CLIPCAERLoss(args, mi_estimator=mi_estimator, num_classes=num_classes, binary_classification_stage=binary_classification_stage)

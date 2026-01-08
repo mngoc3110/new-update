@@ -68,6 +68,10 @@ train_group.add_argument('--batch-size', type=int, default=8, help='Batch size f
 train_group.add_argument('--print-freq', type=int, default=10, help='Frequency of printing training logs.')
 train_group.add_argument('--use-baseline-config', type=str, default='False', choices=['True', 'False'], help='Use the simple, high-LR baseline configuration (no complex re-balancing).')
 train_group.add_argument('--distraction-boost', type=float, default=1.0, help='Multiplier to boost the class weight of Distraction (Class 4).')
+train_group.add_argument('--binary-classification-stage', type=str, default='False', choices=['True', 'False'], help='Train only the binary classification head.')
+train_group.add_argument('--emotional-only', type=str, default='False', choices=['True', 'False'], help='Train only on emotional classes (for Stage 2).')
+train_group.add_argument('--load-stage1-checkpoint', type=str, default=None, help='Path to the best checkpoint from Stage 1 (binary classification).')
+
 
 # --- Optimizer & Learning Rate ---
 optim_group = parser.add_argument_group('Optimizer & LR', 'Hyperparameters for the optimizer and scheduler')
@@ -272,10 +276,10 @@ def run_training(args: argparse.Namespace) -> None:
     args.lambda_dc = 0.0
     
     # Load data first to get class counts
-    print("=> Building dataloaders (Stage 1: Random Shuffle)...")
-    # Force use_weighted_sampler=False if baseline config is active
-    force_random = use_baseline
-    train_loader, val_loader, test_loader_final = build_dataloaders(args, use_weighted_sampler=False)
+    print("=> Building dataloaders...")
+    binary_stage = str(getattr(args, 'binary_classification_stage', 'False')) == 'True'
+    emotional_only = str(getattr(args, 'emotional_only', 'False')) == 'True'
+    train_loader, val_loader, test_loader_final = build_dataloaders(args, use_weighted_sampler=False, binary_classification=binary_stage, emotional_only=emotional_only)
     print("=> Dataloaders built successfully.")
 
     # Pre-calculate class stats
@@ -301,8 +305,32 @@ def run_training(args: argparse.Namespace) -> None:
     # Build model
     print("=> Building model...")
     class_names, input_text = get_class_info(args)
+    if binary_stage:
+        class_names = ['Neutral', 'Non-Neutral']
+    elif emotional_only:
+        class_names = ['Enjoyment', 'Confusion', 'Fatigue', 'Distraction.']
     model = build_model(args, input_text)
     model = model.to(args.device)
+
+    # Load Stage 1 checkpoint if provided
+    if args.load_stage1_checkpoint:
+        if os.path.isfile(args.load_stage1_checkpoint):
+            print(f="=> Loading Stage 1 checkpoint '{args.load_stage1_checkpoint}'")
+            checkpoint = torch.load(args.load_stage1_checkpoint, map_location=args.device, weights_only=False)
+            
+            # Load weights for visual parts and binary head
+            model.load_state_dict(checkpoint['state_dict'], strict=False)
+            print(f="=> Loaded Stage 1 weights.")
+
+            # Freeze the visual backbone, adapter, and binary head
+            for name, param in model.named_parameters():
+                if 'image_encoder' in name or 'adapter' in name or 'binary_head' in name:
+                    param.requires_grad = False
+            
+            print("   [Optimizer] Froze visual backbone, adapter, and binary head.")
+
+        else:
+            print(f="=> No Stage 1 checkpoint found at '{args.load_stage1_checkpoint}'. Starting from scratch.")
 
     # Load model state from checkpoint if resuming
     if args.resume and os.path.isfile(args.resume):
@@ -313,29 +341,48 @@ def run_training(args: argparse.Namespace) -> None:
     print("=> Model built and moved to device successfully.")
 
     # Loss and optimizer
-    # Note: args.class_weights is None for Stage 1
-    criterion = build_criterion(args, mi_estimator=model.mi_estimator, num_classes=len(class_names)).to(args.device)
+    criterion = build_criterion(args, mi_estimator=model.mi_estimator, num_classes=len(class_names), binary_classification_stage=binary_stage).to(args.device)
     
     # Store original lambdas to restore later
     original_lambda_mi = 0.5 # Default hardcoded in .sh if not passed, assuming we want to ramp to 0.5
     original_lambda_dc = 0.5
 
-    params_to_optimize = [
-        {"params": model.temporal_net.parameters(), "lr": args.lr},
-        {"params": model.temporal_net_body.parameters(), "lr": args.lr},
-        {"params": model.image_encoder.parameters(), "lr": args.lr_image_encoder},
-        {"params": model.prompt_learner.parameters(), "lr": args.lr_prompt_learner},
-        {"params": model.project_fc.parameters(), "lr": args.lr_image_encoder},
-        {"params": model.binary_head.parameters(), "lr": args.lr}
-    ]
+    params_to_optimize = []
+    if binary_stage:
+        print("   [Optimizer] Setting up for STAGE 1: Binary Classification Training.")
+        params_to_optimize.append({"params": model.binary_head.parameters(), "lr": args.lr})
+        # Also train the visual backbone
+        params_to_optimize.append({"params": model.image_encoder.parameters(), "lr": args.lr_image_encoder})
+        if model.use_adapter:
+            params_to_optimize.append({"params": model.adapter.parameters(), "lr": args.lr_adapter})
+    elif emotional_only:
+        print("   [Optimizer] Setting up for STAGE 2: Multi-class Emotional Classification Training.")
+        params_to_optimize.append({"params": model.prompt_learner.parameters(), "lr": args.lr_prompt_learner})
+        if model.use_iec:
+            params_to_optimize.append({"params": [model.slerp_t], "lr": args.lr})
+        # The main head is implicitly trained through the prompt learner and other components.
+        # We need to add the final linear layer (project_fc) and the temporal nets
+        params_to_optimize.append({"params": model.temporal_net.parameters(), "lr": args.lr})
+        params_to_optimize.append({"params": model.temporal_net_body.parameters(), "lr": args.lr})
+        params_to_optimize.append({"params": model.project_fc.parameters(), "lr": args.lr})
 
-    if model.use_adapter:
-        params_to_optimize.append({"params": model.adapter.parameters(), "lr": args.lr_adapter})
-
-    if model.use_iec:
-        params_to_optimize.append({"params": [model.slerp_t], "lr": args.lr})
+    else:
+        # Original optimizer setup
+        params_to_optimize = [
+            {"params": model.temporal_net.parameters(), "lr": args.lr},
+            {"params": model.temporal_net_body.parameters(), "lr": args.lr},
+            {"params": model.image_encoder.parameters(), "lr": args.lr_image_encoder},
+            {"params": model.prompt_learner.parameters(), "lr": args.lr_prompt_learner},
+            {"params": model.project_fc.parameters(), "lr": args.lr_image_encoder},
+            {"params": model.binary_head.parameters(), "lr": args.lr}
+        ]
+        if model.use_adapter:
+            params_to_optimize.append({"params": model.adapter.parameters(), "lr": args.lr_adapter})
+        if model.use_iec:
+            params_to_optimize.append({"params": [model.slerp_t], "lr": args.lr})
 
     optimizer = torch.optim.SGD(params_to_optimize, momentum=args.momentum, weight_decay=args.weight_decay)
+
 
     # Load optimizer state from checkpoint if resuming
     if args.resume and os.path.isfile(args.resume):
@@ -597,7 +644,7 @@ def run_training(args: argparse.Namespace) -> None:
             f.write(log_msg + '\n')
 
     # Final evaluation with best model
-    pre_trained_dict = torch.load(best_checkpoint_path,map_location=args.device)['state_dict']
+    pre_trained_dict = torch.load(best_checkpoint_path,map_location=args.device, weights_only=False)['state_dict']
     model.load_state_dict(pre_trained_dict)
     computer_uar_war(
         val_loader=test_loader_final, # Changed to test_loader_final for final evaluation

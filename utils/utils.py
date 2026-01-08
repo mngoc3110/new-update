@@ -196,11 +196,11 @@ def computer_uar_war(
             # Probability of being Non-Neutral (Class 1)
             prob_non_neutral = probs_binary[:, 1]
             
-            # ---- Log binary probs ----
+            # ---- Log binary probs and main predictions ----
             if bin_prob_log_file is not None:
                 for i in range(len(prob_non_neutral)):
                     is_neutral_true = 1 if target[i].item() == 0 else 0
-                    bin_prob_log_file.write(f"{prob_non_neutral[i].item():.4f},{is_neutral_true}\n")
+                    bin_prob_log_file.write(f"{prob_non_neutral[i].item():.4f},{is_neutral_true},{preds_main[i].item()}\n")
 
             # If prob(non-neutral) < threshold -> Force Neutral (0)
             # Otherwise, predict among the emotional classes (1 to 4)
