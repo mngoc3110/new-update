@@ -132,7 +132,7 @@ class Trainer:
                         self.optimizer.zero_grad(set_to_none=True)
 
                 # --- Inference Logic ---
-                if self.criterion.binary_classification_stage:
+                if getattr(self.criterion, 'binary_classification_stage', False):
                     # --- STAGE 1: BINARY CLASSIFICATION ---
                     preds = logits_binary.argmax(dim=1)
                     targets_for_metric = (target > 0).long()

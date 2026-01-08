@@ -134,7 +134,7 @@ class VideoDataset(data.Dataset):
             
             # Remap labels from [2,3,4,5] to [0,1,2,3]
             for record in self.video_list:
-                record._data[2] = str(int(record._data[2]) - 1)
+                record._data[2] = str(int(record._data[2]) - 2)
         
         print(('video number:%d' % (len(self.video_list))))
 

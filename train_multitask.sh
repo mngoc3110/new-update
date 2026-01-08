@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# --- SETUP ENVIRONMENT (Kaggle/Colab) ---
+# --- SETUP ENVIRONMENT ---
 echo "=> Installing dependencies..."
 pip install git+https://github.com/openai/CLIP.git
 pip install imbalanced-learn
@@ -11,16 +11,15 @@ EXP="MultiTask_ViTB32_Balanced_40Epochs"
 OUT="outputs/${EXP}-$(date +%m-%d-%H%M)"
 mkdir -p "${OUT}"
 
-echo "Starting Kaggle Training with Multi-Task (5-class + binary) Strategy"
+echo "Starting Training with Multi-Task (5-class + binary) Strategy"
 
 # --- PATH CONFIGURATION ---
-# Adjust these paths if your Kaggle dataset structure is different
-ROOT_DIR="/kaggle/input/raer-video-emotion-dataset" 
-ANNOT_DIR="/kaggle/input/raer-annot/annotation"
+ROOT_DIR="." 
+ANNOT_DIR="./RAER/annotation"
 TRAIN_TXT="${ANNOT_DIR}/train_80.txt"
 VAL_TXT="${ANNOT_DIR}/val_20.txt"
 TEST_TXT="${ANNOT_DIR}/test.txt"
-BOX_DIR="${ROOT_DIR}/RAER/bounding_box" 
+BOX_DIR="./RAER/bounding_box" 
 FACE_BOX="${BOX_DIR}/face.json"
 BODY_BOX="${BOX_DIR}/body.json"
 CLIP_PATH="ViT-B/32" 
@@ -28,9 +27,9 @@ CLIP_PATH="ViT-B/32"
 python main.py \
   --mode train \
   --exper-name "${EXP}" \
-  --gpu 0 \
+  --gpu mps \
   --seed 42 \
-  --workers 4 \
+  --workers 2 \
   --print-freq 50 \
   \
   --root-dir "${ROOT_DIR}" \
@@ -50,12 +49,12 @@ python main.py \
   \
   --use-hierarchical-prompt True \
   --use-adapter True \
-  --use-iec True \
+  --use-iec False \
   \
   --epochs 40 \
-  --batch-size 16 \
+  --batch-size 8 \
   \
-  --lr 1e-4 \
+  --lr 5e-5 \
   --lr-image-encoder 1e-5 \
   --lr-prompt-learner 5e-4 \
   --lr-adapter 1e-4 \
@@ -66,6 +65,8 @@ python main.py \
   --lambda-mi 0.0 \
   --lambda-dc 0.0 \
   --lambda-cons 0.0 \
-  --use-focal-loss False
+  --use-focal-loss True
 
-# Note: Batch size 16 is a good starting point for Kaggle GPUs.
+# Note: This script runs the recommended stable multi-task strategy.
+# It uses a weighted CE loss for the main 5-class task and an auxiliary
+# binary cross-entropy loss to help regularize the Neutral class boundary.

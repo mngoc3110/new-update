@@ -66,12 +66,6 @@ train_group = parser.add_argument_group('Training Control', 'Parameters to contr
 train_group.add_argument('--epochs', type=int, default=20, help='Total number of training epochs.')
 train_group.add_argument('--batch-size', type=int, default=8, help='Batch size for training and validation.')
 train_group.add_argument('--print-freq', type=int, default=10, help='Frequency of printing training logs.')
-train_group.add_argument('--use-baseline-config', type=str, default='False', choices=['True', 'False'], help='Use the simple, high-LR baseline configuration (no complex re-balancing).')
-train_group.add_argument('--distraction-boost', type=float, default=1.0, help='Multiplier to boost the class weight of Distraction (Class 4).')
-train_group.add_argument('--binary-classification-stage', type=str, default='False', choices=['True', 'False'], help='Train only the binary classification head.')
-train_group.add_argument('--emotional-only', type=str, default='False', choices=['True', 'False'], help='Train only on emotional classes (for Stage 2).')
-train_group.add_argument('--load-stage1-checkpoint', type=str, default=None, help='Path to the best checkpoint from Stage 1 (binary classification).')
-
 
 # --- Optimizer & Learning Rate ---
 optim_group = parser.add_argument_group('Optimizer & LR', 'Hyperparameters for the optimizer and scheduler')
@@ -100,53 +94,23 @@ model_group.add_argument('--use-multi-scale', type=str, default='False', choices
 model_group.add_argument('--use-hierarchical-prompt', type=str, default='False', choices=['True', 'False'], help='Enable Lite-HiCroPL 3-level prompt ensemble.')
 model_group.add_argument('--use-adapter', type=str, default='False', choices=['True', 'False'], help='Enable Expression-aware Adapter (EAA).')
 model_group.add_argument('--use-iec', type=str, default='False', choices=['True', 'False'], help='Enable Instance-enhanced Expression Classifier (IEC).')
+model_group.add_argument('--binary-classification-stage', type=str, default='False', choices=['True', 'False'], help='Enable Stage 1 Binary Classification (Neutral vs Non-Neutral).')
 
 # --- Loss & Regularization ---
 loss_group = parser.add_argument_group('Loss & Regularization', 'Hyperparameters for loss functions and regularization')
-loss_group.add_argument('--use-lsr2-loss', type=str, default='False', choices=['True', 'False'], help='Use LSR2 loss (baseline specific) instead of standard CE/Focal Loss.')
 loss_group.add_argument('--lambda-mi', type=float, default=1.0, help='Weight for Mutual Information (MI) loss.')
 loss_group.add_argument('--lambda-dc', type=float, default=1.0, help='Weight for Distance Correlation (DC) loss.')
 loss_group.add_argument('--lambda-cons', type=float, default=0.0, help='Weight for Consistency Loss (KL Divergence).')
-loss_group.add_argument('--lambda-binary', type=float, default=1.0, help='Weight for Hierarchical Binary Loss (Neutral vs Non-Neutral).') # New
+loss_group.add_argument('--lambda-binary', type=float, default=0.3, help='Weight for the auxiliary binary head loss.') # Multi-task weight
 loss_group.add_argument('--mi-warmup', type=int, default=0, help='Epochs to warmup MI loss.')
 loss_group.add_argument('--mi-ramp', type=int, default=0, help='Epochs to ramp up MI loss.')
 loss_group.add_argument('--dc-warmup', type=int, default=0, help='Epochs to warmup DC loss.')
 loss_group.add_argument('--dc-ramp', type=int, default=0, help='Epochs to ramp up DC loss.')
 loss_group.add_argument('--label-smoothing', type=float, default=0.0, help='Label smoothing factor.')
-loss_group.add_argument('--semantic-smoothing', type=str, default='True', choices=['True', 'False'], help='Whether to use semantic-guided label smoothing (LDLVA-inspired).')
-loss_group.add_argument('--smoothing-temp', type=float, default=0.1, help='Temperature for semantic label distribution (lower = sharper).')
+loss_group.add_argument('--use-focal-loss', type=str, default='False', choices=['True', 'False'], help='Use Focal Loss instead of standard Cross Entropy.')
+loss_group.add_argument('--focal-gamma', type=float, default=2.0, help='Gamma parameter for Focal Loss.')
 loss_group.add_argument('--use-amp', type=str, default='True', choices=['True', 'False'], help='Enable or disable Automatic Mixed Precision (AMP).')
 loss_group.add_argument('--gradient-accumulation-steps', type=int, default=1, help='Number of steps to accumulate gradients before updating weights.')
-loss_group.add_argument('--use-focal-loss', type=str, default='True', choices=['True', 'False'], help='Use Focal Loss instead of CE for Stage 1.')
-loss_group.add_argument('--focal-gamma', type=float, default=2.0, help='Gamma parameter for Focal Loss.')
-
-# --- Four-Stage Training Control ---
-stage_group = parser.add_argument_group('Four-Stage Training', 'Parameters for the multi-stage training strategy')
-# Stage 1: Warmup (0 -> stage1_epochs)
-stage_group.add_argument('--stage1-epochs', type=int, default=15, help='End epoch of Stage 1 (Warmup).')
-stage_group.add_argument('--stage1-label-smoothing', type=float, default=0.05, help='Label smoothing factor for Stage 1.')
-stage_group.add_argument('--stage1-smoothing-temp', type=float, default=0.15, help='Smoothing temp for Stage 1.')
-
-# Stage 2: Re-balancing (stage1_epochs -> stage2_epochs)
-stage_group.add_argument('--stage2-epochs', type=int, default=40, help='End epoch of Stage 2 (Margin Learning).')
-stage_group.add_argument('--stage2-logit-adjust-tau', type=float, default=0.4, help='Tau for Logit Adjustment in Stage 2.')
-stage_group.add_argument('--stage2-max-class-weight', type=float, default=2.0, help='Max class weight for Weighted Sampler in Stage 2.')
-stage_group.add_argument('--stage2-smoothing-temp', type=float, default=0.15, help='Smoothing temp for Stage 2.')
-stage_group.add_argument('--stage2-label-smoothing', type=float, default=0.1, help='Label smoothing factor for Stage 2.')
-
-# Stage 3: Aggressive UAR (stage2_epochs -> stage3_epochs)
-stage_group.add_argument('--stage3-epochs', type=int, default=75, help='End epoch of Stage 3 (Aggressive UAR).')
-stage_group.add_argument('--stage3-logit-adjust-tau', type=float, default=0.8, help='Tau for Logit Adjustment in Stage 3 (Stronger).')
-stage_group.add_argument('--stage3-max-class-weight', type=float, default=2.5, help='Max class weight for Weighted Sampler in Stage 3.')
-stage_group.add_argument('--stage3-smoothing-temp', type=float, default=0.18, help='Smoothing temp for Stage 3 (Sharper).')
-
-# Stage 4: Cooldown/Polish (stage3_epochs -> end)
-stage_group.add_argument('--stage4-logit-adjust-tau', type=float, default=0.5, help='Tau for Logit Adjustment in Stage 4 (Reduced).')
-stage_group.add_argument('--stage4-max-class-weight', type=float, default=2.0, help='Max class weight for Stage 4 (Stabilized).')
-
-
-stage_group.add_argument('--logit-adjust-tau', type=float, default=0.0, help='Initial Tau for Logit Adjustment (usually 0 for Stage 1).')
-
 
 # ==================== Helper Functions ====================
 def setup_environment(args: argparse.Namespace) -> argparse.Namespace:
@@ -202,390 +166,108 @@ def setup_paths_and_logging(args: argparse.Namespace) -> argparse.Namespace:
         
     return args
 
-def calculate_weights(class_counts, max_weight, distraction_boost=1.0):
-    if class_counts is None:
-        return None
-    total_samples = sum(class_counts)
-    num_classes = len(class_counts)
-    # w_j = N / (K * n_j)
-    weights = total_samples / (num_classes * (class_counts + 1e-6))
-    # Clip
-    weights = np.clip(weights, a_min=None, a_max=max_weight)
-    
-    # Apply Distraction Boost (assuming Distraction is index 4 - Class 5)
-    if num_classes > 4 and distraction_boost > 1.0:
-        weights[4] *= distraction_boost
-        print(f"   >>> Applying Distraction Boost (x{distraction_boost}) -> New Distraction Weight: {weights[4]:.4f}")
-        
-    return weights.tolist()
-
 # ==================== Training Function ====================
 def run_training(args: argparse.Namespace) -> None:
-    # Check for Baseline Config Override
-    use_baseline = str(getattr(args, 'use_baseline_config', 'False')) == 'True'
-    if use_baseline:
-        print("\n" + "!"*50)
-        print("   >>> BASELINE CONFIG ENABLED: Overriding parameters <<<")
-        print("   LR: 0.01 | LR_Image: 1e-5 | No Weighted Sampler | No Logit Adj")
-        print("!"*50 + "\n")
-        args.lr = 0.01
-        args.lr_image_encoder = 1e-5
-        args.lr_prompt_learner = 0.001
-        args.logit_adjust_tau = 0.0
-        args.lambda_mi = 0.0
-        args.lambda_dc = 0.0
-        args.lambda_cons = 0.0
-        args.use_focal_loss = 'False'
-        
-    # Paths for logging and saving
+    # --- Paths and Setup ---
     log_txt_path = os.path.join(args.output_path, 'log.txt')
-    log_curve_path = os.path.join(args.output_path, 'log.png')
     log_confusion_matrix_path = os.path.join(args.output_path, 'confusion_matrix.png')
     checkpoint_path = os.path.join(args.output_path, 'model.pth')
-    best_checkpoint_path = os.path.join(args.output_path, 'model_best.pth')        
+    best_checkpoint_path = os.path.join(args.output_path, 'model_best.pth')
+    
     best_uar = 0.0
-    best_war = 0.0 # Initialize best_war here to avoid UnboundLocalError
     start_epoch = 0
     recorder = RecorderMeter(args.epochs)
+    
+    # --- Dataloaders ---
+    # For multi-task, we always load the full 5-class dataset
+    print("=> Building dataloaders...")
+    train_loader, val_loader, test_loader_final = build_dataloaders(args, use_weighted_sampler=False) # Keep sampler simple for now
+    print("=> Dataloaders built successfully.")
 
-    # Load checkpoint if resuming training
+    # --- Class Weights for Imbalance ---
+    args.class_weights = None
+    try:
+        print("=> Calculating class weights for the loss function...")
+        train_dataset = train_loader.dataset
+        # Assuming labels are 1-5, mapping to 0-4
+        labels = [record.label - 1 for record in train_dataset.video_list]
+        class_counts = np.bincount(labels, minlength=5) # Ensure 5 classes
+        
+    # Effective Number of Samples (ENOS) weighting
+        # https://arxiv.org/abs/1901.05555
+        beta = 0.999 # A common value for beta, can be tuned
+        
+        # Calculate effective number for each class
+        effective_num = 1.0 - np.power(beta, class_counts)
+        
+        # Calculate unnormalized weights: (1 - beta) / effective_num
+        per_cls_weights = (1.0 - beta) / np.array(effective_num)
+        
+        # Normalize weights to sum to the number of classes (as per common practice)
+        # This makes the average weight across classes equal to 1.
+        weights = per_cls_weights / np.sum(per_cls_weights) * len(class_counts)
+        
+        args.class_weights = weights.tolist()
+        print(f"   Class Counts: {class_counts}")
+        print(f"   Applying Class Weights: {[f'{w:.2f}' for w in args.class_weights]}")
+        
+    except Exception as e:
+        print(f"Warning: Could not calculate class weights. Error: {e}")
+
+    # --- Model ---
+    print("=> Building model...")
+    class_names, input_text = get_class_info(args)
+    model = build_model(args, input_text).to(args.device)
+
+    # --- Optimizer ---
+    print("=> Setting up optimizer for multi-task training...")
+    # Train all relevant parts: image encoder, adapter, prompts, and both heads.
+    params_to_optimize = [
+        {"params": model.temporal_net.parameters(), "lr": args.lr},
+        {"params": model.temporal_net_body.parameters(), "lr": args.lr},
+        {"params": model.image_encoder.parameters(), "lr": args.lr_image_encoder},
+        {"params": model.prompt_learner.parameters(), "lr": args.lr_prompt_learner},
+        {"params": model.project_fc.parameters(), "lr": args.lr}, # Main head
+        {"params": model.binary_head.parameters(), "lr": args.lr}   # Binary head
+    ]
+    if model.use_adapter:
+        params_to_optimize.append({"params": model.adapter.parameters(), "lr": args.lr_adapter})
+    if model.use_iec:
+        params_to_optimize.append({"params": [model.slerp_t], "lr": args.lr})
+    
+    optimizer = torch.optim.SGD(params_to_optimize, momentum=args.momentum, weight_decay=args.weight_decay)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=args.gamma)
+
+    # --- Resume Logic ---
     if args.resume:
         if os.path.isfile(args.resume):
             print(f="=> Loading checkpoint '{args.resume}'")
-            checkpoint = torch.load(args.resume, map_location=args.device, weights_only=False) # ADDED weights_only=False
+            checkpoint = torch.load(args.resume, map_location=args.device, weights_only=False)
             start_epoch = checkpoint['epoch']
-            best_uar = checkpoint['best_acc'] # Assuming best_acc stores UAR
-            if 'best_war' in checkpoint:
-                best_war = checkpoint['best_war']
-            # Load recorder state (optional, if you want to continue plot/history)
+            best_uar = checkpoint['best_acc']
+            model.load_state_dict(checkpoint['state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer'])
+            if 'scheduler' in checkpoint:
+                scheduler.load_state_dict(checkpoint['scheduler'])
             if 'recorder' in checkpoint:
                 recorder = checkpoint['recorder']
-            print(f="=> Loaded checkpoint '{args.resume}' (epoch {checkpoint['epoch']})")
+            print(f="=> Loaded checkpoint '{args.resume}' (epoch {start_epoch})")
         else:
             print(f="=> No checkpoint found at '{args.resume}', starting from scratch.")
-            
-    # --- STAGE 1 SETUP (Safe Base Learning) ---
-    print("=> INITIALIZING STAGE 1: Warm-up (Epoch 0 - {})".format(args.stage1_epochs))
-    # Standard Setup: No Weighted Sampler, No Weights, No Logit Adj
-    args.logit_adjust_tau = 0.0
-    args.smoothing_temp = args.stage1_smoothing_temp
-    args.label_smoothing = args.stage1_label_smoothing
     
-    # Disable MI/DC in Stage 1 initially (or very low)
-    args.lambda_mi = 0.0
-    args.lambda_dc = 0.0
+    # --- Loss and Trainer ---
+    criterion = build_criterion(args, mi_estimator=model.mi_estimator, num_classes=len(class_names)).to(args.device)
     
-    # Load data first to get class counts
-    print("=> Building dataloaders...")
-    binary_stage = str(getattr(args, 'binary_classification_stage', 'False')) == 'True'
-    emotional_only = str(getattr(args, 'emotional_only', 'False')) == 'True'
-    train_loader, val_loader, test_loader_final = build_dataloaders(args, use_weighted_sampler=False, binary_classification=binary_stage, emotional_only=emotional_only)
-    print("=> Dataloaders built successfully.")
-
-    # Pre-calculate class stats
-    class_counts = None
-    if args.dataset == 'RAER':
-        try:
-            train_dataset = train_loader.dataset
-            labels = [record.label - 1 for record in train_dataset.video_list]
-            class_counts = np.bincount(labels)
-            args.class_counts = class_counts.tolist() 
-            print(f"   Class Counts: {class_counts}")
-            
-            # --- STAGE 1 WEIGHTS (None or very mild 1.2) ---
-            # We use None to be strictly "Warm-up" as requested
-            args.class_weights = None 
-            print(f"   [Stage 1] Weights OFF (Standard CE)")
-            
-        except Exception as e:
-            print(f"Warning: Could not calculate class counts. Error: {e}")
-            args.class_counts = None
-            args.class_weights = None
-
-    # Build model
-    print("=> Building model...")
-    class_names, input_text = get_class_info(args)
-    if binary_stage:
-        class_names = ['Neutral', 'Non-Neutral']
-    elif emotional_only:
-        class_names = ['Enjoyment', 'Confusion', 'Fatigue', 'Distraction.']
-    model = build_model(args, input_text)
-    model = model.to(args.device)
-
-    # Load Stage 1 checkpoint if provided
-    if args.load_stage1_checkpoint:
-        if os.path.isfile(args.load_stage1_checkpoint):
-            print(f="=> Loading Stage 1 checkpoint '{args.load_stage1_checkpoint}'")
-            checkpoint = torch.load(args.load_stage1_checkpoint, map_location=args.device, weights_only=False)
-            
-            # Load weights for visual parts and binary head
-            model.load_state_dict(checkpoint['state_dict'], strict=False)
-            print(f="=> Loaded Stage 1 weights.")
-
-            # Freeze the visual backbone, adapter, and binary head
-            for name, param in model.named_parameters():
-                if 'image_encoder' in name or 'adapter' in name or 'binary_head' in name:
-                    param.requires_grad = False
-            
-            print("   [Optimizer] Froze visual backbone, adapter, and binary head.")
-
-        else:
-            print(f="=> No Stage 1 checkpoint found at '{args.load_stage1_checkpoint}'. Starting from scratch.")
-
-    # Load model state from checkpoint if resuming
-    if args.resume and os.path.isfile(args.resume):
-        checkpoint = torch.load(args.resume, map_location=args.device, weights_only=False) # ADDED weights_only=False
-        model.load_state_dict(checkpoint['state_dict'])
-        print(f="=> Model state loaded from '{args.resume}'")
-
-    print("=> Model built and moved to device successfully.")
-
-    # Loss and optimizer
-    criterion = build_criterion(args, mi_estimator=model.mi_estimator, num_classes=len(class_names), binary_classification_stage=binary_stage).to(args.device)
-    
-    # Store original lambdas to restore later
-    original_lambda_mi = 0.5 # Default hardcoded in .sh if not passed, assuming we want to ramp to 0.5
-    original_lambda_dc = 0.5
-
-    params_to_optimize = []
-    if binary_stage:
-        print("   [Optimizer] Setting up for STAGE 1: Binary Classification Training.")
-        params_to_optimize.append({"params": model.binary_head.parameters(), "lr": args.lr})
-        # Also train the visual backbone
-        params_to_optimize.append({"params": model.image_encoder.parameters(), "lr": args.lr_image_encoder})
-        if model.use_adapter:
-            params_to_optimize.append({"params": model.adapter.parameters(), "lr": args.lr_adapter})
-    elif emotional_only:
-        print("   [Optimizer] Setting up for STAGE 2: Multi-class Emotional Classification Training.")
-        params_to_optimize.append({"params": model.prompt_learner.parameters(), "lr": args.lr_prompt_learner})
-        if model.use_iec:
-            params_to_optimize.append({"params": [model.slerp_t], "lr": args.lr})
-        # The main head is implicitly trained through the prompt learner and other components.
-        # We need to add the final linear layer (project_fc) and the temporal nets
-        params_to_optimize.append({"params": model.temporal_net.parameters(), "lr": args.lr})
-        params_to_optimize.append({"params": model.temporal_net_body.parameters(), "lr": args.lr})
-        params_to_optimize.append({"params": model.project_fc.parameters(), "lr": args.lr})
-
-    else:
-        # Original optimizer setup
-        params_to_optimize = [
-            {"params": model.temporal_net.parameters(), "lr": args.lr},
-            {"params": model.temporal_net_body.parameters(), "lr": args.lr},
-            {"params": model.image_encoder.parameters(), "lr": args.lr_image_encoder},
-            {"params": model.prompt_learner.parameters(), "lr": args.lr_prompt_learner},
-            {"params": model.project_fc.parameters(), "lr": args.lr_image_encoder},
-            {"params": model.binary_head.parameters(), "lr": args.lr}
-        ]
-        if model.use_adapter:
-            params_to_optimize.append({"params": model.adapter.parameters(), "lr": args.lr_adapter})
-        if model.use_iec:
-            params_to_optimize.append({"params": [model.slerp_t], "lr": args.lr})
-
-    optimizer = torch.optim.SGD(params_to_optimize, momentum=args.momentum, weight_decay=args.weight_decay)
-
-
-    # Load optimizer state from checkpoint if resuming
-    if args.resume and os.path.isfile(args.resume):
-        checkpoint = torch.load(args.resume, map_location=args.device, weights_only=False) # ADDED weights_only=False
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        print(f="=> Optimizer state loaded from '{args.resume}'")
-
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=args.gamma)
-    
-    # Load scheduler state from checkpoint if resuming
-    if args.resume and os.path.isfile(args.resume):
-        checkpoint = torch.load(args.resume, map_location=args.device, weights_only=False) # ADDED weights_only=False
-        if 'scheduler' in checkpoint: # Scheduler might not always be saved
-            scheduler.load_state_dict(checkpoint['scheduler'])
-            print(f="=> Scheduler state loaded from '{args.resume}'")
-
-    # Trainer
     trainer = Trainer(
         model, criterion, optimizer, scheduler, args.device,
         use_amp=(args.use_amp == 'True'), 
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         log_txt_path=log_txt_path,
-        class_names=class_names,
-        inference_threshold_binary=args.inference_threshold_binary # Pass the new argument
+        class_names=class_names
     )
-    
-    # Re-evaluate start_epoch and best_uar/best_war if recorder was loaded.
-    # Otherwise, these would be initialized to 0.
-    if args.resume and os.path.isfile(args.resume) and 'recorder' in checkpoint:
-        # Assuming recorder might hold best_acc/best_war that are updated.
-        # Otherwise, manually set best_uar/best_war from loaded checkpoint if needed.
-        pass # The recorder from checkpoint is now active.
 
-    # --- RESUME LOGIC: Set correct stage parameters based on start_epoch ---
-    if not use_baseline and start_epoch > 0:
-        print(f="=> Resuming at Epoch {start_epoch}. Setting correct Stage parameters...")
-        
-        # Check which stage we are in and apply ALL settings for that stage immediately
-        
-        # STAGE 4 CONFIG
-        if start_epoch >= args.stage3_epochs:
-            print(f"   [Resume] Applying STAGE 4 Config (Cooldown).")
-            args.logit_adjust_tau = args.stage4_logit_adjust_tau
-            args.stage2_max_class_weight = args.stage4_max_class_weight
-            train_loader, val_loader, test_loader_final = build_dataloaders(args, use_weighted_sampler=True)
-            criterion.logit_adjust_tau = args.logit_adjust_tau
-            
-        # STAGE 3 CONFIG
-        elif start_epoch >= args.stage2_epochs:
-            print(f"   [Resume] Applying STAGE 3 Config (Aggressive Push).")
-            args.logit_adjust_tau = args.stage3_logit_adjust_tau
-            args.smoothing_temp = args.stage3_smoothing_temp
-            
-            args.stage2_max_class_weight = args.stage3_max_class_weight
-            train_loader, val_loader, test_loader_final = build_dataloaders(args, use_weighted_sampler=True)
-            
-            if class_counts is not None:
-                args.class_weights = calculate_weights(class_counts, args.stage3_max_class_weight)
-                new_weights = torch.tensor(args.class_weights, dtype=torch.float32).to(args.device)
-                criterion.class_weights = new_weights
-                if criterion.ce_loss is not None:
-                    criterion.ce_loss.weight = new_weights
-            
-            criterion.logit_adjust_tau = args.logit_adjust_tau
-            criterion.smoothing_temp = args.smoothing_temp
-
-        # STAGE 2 CONFIG
-        elif start_epoch >= args.stage1_epochs:
-            print(f"   [Resume] Applying STAGE 2 Config (Double Re-Weighting).")
-            args.logit_adjust_tau = args.stage2_logit_adjust_tau
-            args.smoothing_temp = args.stage2_smoothing_temp
-            args.label_smoothing = args.stage2_label_smoothing
-            
-            train_loader, val_loader, test_loader_final = build_dataloaders(args, use_weighted_sampler=True)
-            
-            if class_counts is not None:
-                args.class_weights = calculate_weights(class_counts, args.stage2_max_class_weight)
-                new_weights = torch.tensor(args.class_weights, dtype=torch.float32).to(args.device)
-                criterion.class_weights = new_weights
-                if criterion.ce_loss is not None:
-                    criterion.ce_loss.weight = new_weights
-                    criterion.ce_loss.label_smoothing = args.label_smoothing
-
-            criterion.lambda_mi = original_lambda_mi
-            criterion.lambda_dc = original_lambda_dc
-            criterion.logit_adjust_tau = args.logit_adjust_tau
-            criterion.smoothing_temp = args.smoothing_temp
-            criterion.label_smoothing = args.label_smoothing
-            
-            # Ensure Priors
-            if criterion.class_priors is None and class_counts is not None:
-                counts_t = torch.tensor(class_counts, dtype=torch.float32).to(args.device)
-                priors = counts_t / counts_t.sum()
-                criterion.register_buffer("class_priors", priors)
-
+    # --- Training Loop ---
     for epoch in range(start_epoch, args.epochs):
-        
-        # Bypass stage logic if using baseline config
-        if not use_baseline:
-            # ==========================================
-            # 4-STAGE TRANSITION LOGIC (REFINED)
-            # ==========================================
-            
-            # --- Enter STAGE 2: DRW (Deferred Re-Weighting) ---
-            if epoch == args.stage1_epochs:
-                print("\n" + "="*50)
-                print(f"   >>> TRANSITIONING TO STAGE 2: DOUBLE RE-WEIGHTING (Epoch {epoch}) <<<")
-                print("="*50)
-                
-                # 1. Update Params
-                args.logit_adjust_tau = args.stage2_logit_adjust_tau
-                args.smoothing_temp = args.stage2_smoothing_temp
-                args.label_smoothing = args.stage2_label_smoothing
-                
-                # 2. Switch Sampler (Weighted)
-                print(f"   [Stage 2] Switching to WeightedRandomSampler (Max Weight {args.stage2_max_class_weight})...")
-                train_loader, val_loader, test_loader_final = build_dataloaders(args, use_weighted_sampler=True)
-                
-                # 3. Weights: ON (Double Reweighting Strategy) - Force the model to learn!
-                if class_counts is not None:
-                    args.class_weights = calculate_weights(class_counts, args.stage2_max_class_weight)
-                    print(f"   [Stage 2] Class Weights: ON (Double Penalty Active). Weights: {np.round(args.class_weights, 4)}")
-                
-                # 4. Ramp up MI/DC
-                print(f"   [Stage 2] Ramping up MI/DC Loss...")
-                criterion.lambda_mi = original_lambda_mi
-                criterion.lambda_dc = original_lambda_dc
-                
-                # 5. Update Criterion
-                criterion.logit_adjust_tau = args.logit_adjust_tau
-                criterion.smoothing_temp = args.smoothing_temp
-                criterion.label_smoothing = args.label_smoothing
-                
-                # Apply Weights explicitly
-                if args.class_weights is not None:
-                    new_weights = torch.tensor(args.class_weights, dtype=torch.float32).to(args.device)
-                    criterion.class_weights = new_weights
-                    if criterion.ce_loss is not None:
-                        criterion.ce_loss.weight = new_weights
-                        criterion.ce_loss.label_smoothing = args.label_smoothing
-                
-                # Ensure Priors for Logit Adj
-                if criterion.class_priors is None and class_counts is not None:
-                    counts_t = torch.tensor(class_counts, dtype=torch.float32).to(args.device)
-                    priors = counts_t / counts_t.sum()
-                    criterion.register_buffer("class_priors", priors)
-                
-                print("   [Stage 2] Transition Complete.\n")
-
-            # --- Enter STAGE 3: Targeted Push ---
-            elif epoch == args.stage2_epochs:
-                print("\n" + "="*50)
-                print(f"   >>> TRANSITIONING TO STAGE 3: AGGRESSIVE DOUBLE PUSH (Epoch {epoch}) <<<")
-                print("="*50)
-                
-                # 1. Update Params (Aggressive)
-                args.logit_adjust_tau = args.stage3_logit_adjust_tau
-                args.smoothing_temp = args.stage3_smoothing_temp 
-                
-                # 2. Update Sampler
-                print(f"   [Stage 3] Updating WeightedRandomSampler (Max Weight {args.stage3_max_class_weight})...")
-                args.stage2_max_class_weight = args.stage3_max_class_weight 
-                train_loader, val_loader, test_loader_final = build_dataloaders(args, use_weighted_sampler=True)
-                
-                # 3. Weights: ON (Stronger)
-                if class_counts is not None:
-                    args.class_weights = calculate_weights(class_counts, args.stage3_max_class_weight)
-                    print(f"   [Stage 3] Class Weights: MAXIMUM PENALTY. Weights: {np.round(args.class_weights, 4)}")
-                
-                # 4. Update Criterion
-                criterion.logit_adjust_tau = args.logit_adjust_tau
-                criterion.smoothing_temp = args.smoothing_temp
-                
-                if args.class_weights is not None:
-                    new_weights = torch.tensor(args.class_weights, dtype=torch.float32).to(args.device)
-                    criterion.class_weights = new_weights
-                    if criterion.ce_loss is not None:
-                        criterion.ce_loss.weight = new_weights
-
-                print("   [Stage 3] Transition Complete.\n")
-
-            # --- Enter STAGE 4: Cooldown & Polish ---
-            elif epoch == args.stage3_epochs:
-                print("\n" + "="*50)
-                print(f"   >>> TRANSITIONING TO STAGE 4: Cooldown & Polish (Epoch {epoch}) <<<")
-                print("="*50)
-                
-                # 1. Update Params (Stable)
-                args.logit_adjust_tau = args.stage4_logit_adjust_tau
-                
-                # 2. Update Sampler (Cap 2.0 - Reduced)
-                print(f"   [Stage 4] Reducing WeightedRandomSampler (Max Weight {args.stage4_max_class_weight})...")
-                args.stage2_max_class_weight = args.stage4_max_class_weight
-                train_loader, val_loader, test_loader_final = build_dataloaders(args, use_weighted_sampler=True)
-                
-                # 3. Weights: Still OFF
-                
-                # 4. Update Criterion
-                criterion.logit_adjust_tau = args.logit_adjust_tau
-                # Temp can stay or reduce slightly, keeping it stable
-                
-                print("   [Stage 4] Transition Complete. LR should be decaying now.\n")
-
         inf = f'******************** Epoch: {epoch} ********************'
         start_time = time.time()
         print(inf)
@@ -596,66 +278,57 @@ def run_training(args: argparse.Namespace) -> None:
         current_lrs = [param_group['lr'] for param_group in optimizer.param_groups]
         lr_str = ' '.join([f'{lr:.1e}' for lr in current_lrs])
         log_msg = f'Current learning rates: {lr_str}'
+        print(log_msg)
         with open(log_txt_path, 'a') as f:
             f.write(log_msg + '\n')
-        print(log_msg)
 
         # Train & Validate
         train_war, train_uar, train_los, _ = trainer.train_epoch(train_loader, epoch)
         val_war, val_uar, val_los, _ = trainer.validate(val_loader, str(epoch))
         scheduler.step()
 
-        # Update best metrics
-        if val_uar > best_uar:
-            best_uar = val_uar
-        if val_war > best_war:
-            best_war = val_war
-        
-        is_best = val_uar >= best_uar # Keep using UAR for is_best criterion or change as needed
+        # Save best model based on UAR
+        is_best = val_uar > best_uar
+        best_uar = max(val_uar, best_uar)
 
-        # Save checkpoint
         save_checkpoint({
             'epoch': epoch + 1,
             'state_dict': model.state_dict(),
             'best_acc': best_uar,
-            'best_war': best_war, 
             'optimizer': optimizer.state_dict(),
+            'scheduler': scheduler.state_dict(),
             'recorder': recorder
         }, checkpoint_path)
         
         if is_best:
             shutil.copyfile(checkpoint_path, best_checkpoint_path)
 
-        # Record metrics
-        epoch_time = time.time() - start_time
-        # RecorderMeter in utils.py takes (epoch, train_loss, train_war, train_uar)
-        recorder.update(epoch, train_los, train_war, train_uar)
-        # recorder.plot_curve(log_curve_path) # plot_curve method is missing in utils.py
-
         # Log results
+        epoch_time = time.time() - start_time
         log_msg = (
             f'Train WAR: {train_war:.2f}% | Train UAR: {train_uar:.2f}%\n'
             f'Valid WAR: {val_war:.2f}% | Valid UAR: {val_uar:.2f}%\n'
-            f'Best Valid WAR: {best_war:.2f}% | Best Valid UAR: {best_uar:.2f}%\n'
+            f'Best Valid UAR: {best_uar:.2f}%\n'
             f'Epoch time: {epoch_time:.2f}s\n'
         )
         print(log_msg)
         with open(log_txt_path, 'a') as f:
             f.write(log_msg + '\n')
 
-    # Final evaluation with best model
-    pre_trained_dict = torch.load(best_checkpoint_path,map_location=args.device, weights_only=False)['state_dict']
+    # --- Final Evaluation ---
+    print("=> Starting final evaluation with the best model...")
+    pre_trained_dict = torch.load(best_checkpoint_path, map_location=args.device)['state_dict']
     model.load_state_dict(pre_trained_dict)
     computer_uar_war(
-        val_loader=test_loader_final, # Changed to test_loader_final for final evaluation
+        val_loader=test_loader_final,
         model=model,
         device=args.device,
         class_names=class_names,
         log_confusion_matrix_path=log_confusion_matrix_path,
         log_txt_path=log_txt_path,
-        title=f"Confusion Matrix on {args.dataset} (Final Test Set)",
-        inference_threshold_binary=args.inference_threshold_binary # Pass the threshold
+        title=f"Confusion Matrix on {args.dataset} (Final Test Set)"
     )
+
 
 def run_eval(args: argparse.Namespace) -> None:
     print("=> Starting evaluation mode...")
