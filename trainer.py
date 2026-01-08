@@ -132,24 +132,30 @@ class Trainer:
                         self.optimizer.zero_grad(set_to_none=True)
 
                 # --- Inference Logic ---
-                preds_main = logits.argmax(dim=1)
-                
-                # Hierarchical Inference (Valid/Test Only)
-                if not is_train and self.inference_threshold_binary > 0 and logits_binary is not None:
-                    # Calculate Prob of "Non-Neutral" (Class 1)
-                    prob_binary = torch.softmax(logits_binary, dim=1)[:, 1]
-                    
-                    # If Prob(Non-Neutral) < Threshold -> Force Neutral (0)
-                    # Else -> Keep Main Prediction
-                    preds = torch.where(
-                        prob_binary >= self.inference_threshold_binary, 
-                        preds_main, 
-                        torch.tensor(0, device=self.device)
-                    )
+                if self.criterion.binary_classification_stage:
+                    # --- STAGE 1: BINARY CLASSIFICATION ---
+                    preds = logits_binary.argmax(dim=1)
+                    targets_for_metric = (target > 0).long()
                 else:
-                    preds = preds_main
+                    # --- STAGE 2 / STANDARD ---
+                    preds_main = logits.argmax(dim=1)
+                    targets_for_metric = target
+                    # Hierarchical Inference (Valid/Test Only)
+                    if not is_train and self.inference_threshold_binary > 0 and logits_binary is not None:
+                        # Calculate Prob of "Non-Neutral" (Class 1)
+                        prob_binary = torch.softmax(logits_binary, dim=1)[:, 1]
+                        
+                        # If Prob(Non-Neutral) < Threshold -> Force Neutral (0)
+                        # Else -> Keep Main Prediction
+                        preds = torch.where(
+                            prob_binary >= self.inference_threshold_binary, 
+                            preds_main, 
+                            torch.tensor(0, device=self.device)
+                        )
+                    else:
+                        preds = preds_main
 
-                correct = preds.eq(target).sum().item()
+                correct = preds.eq(targets_for_metric).sum().item()
                 acc = (correct / target.size(0)) * 100.0
 
                 losses.update(float(loss.item()) * self.accumulation_steps, target.size(0))
