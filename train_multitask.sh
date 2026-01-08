@@ -27,9 +27,9 @@ CLIP_PATH="ViT-B/32"
 python main.py \
   --mode train \
   --exper-name "${EXP}" \
-  --gpu mps \
+  --gpu 0 \
   --seed 42 \
-  --workers 2 \
+  --workers 4 \
   --print-freq 50 \
   \
   --root-dir "${ROOT_DIR}" \
