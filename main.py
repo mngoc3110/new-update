@@ -134,6 +134,7 @@ loss_group.add_argument('--stage4-smoothing-temp', type=float, default=0.30, hel
 loss_group.add_argument('--stage4-neutral-weight', type=float, default=-1.0, help='Weight for neutral class in stage 4. -1 to disable.')
 loss_group.add_argument('--inference-neutral-bias', type=float, default=0.0, help='Post-hoc bias for neutral class during inference.')
 loss_group.add_argument('--stage3-logit-adjust-tau-neutral', type=float, default=0.1, help='Logit adjustment tau for neutral class in stage 3.')
+loss_group.add_argument('--use-lsr2-loss', type=str, default='True', choices=['True', 'False'], help='Use LSR2 loss.')
 
 # ==================== Helper Functions ====================
 def setup_environment(args: argparse.Namespace) -> argparse.Namespace:
