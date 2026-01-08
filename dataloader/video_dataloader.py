@@ -307,7 +307,7 @@ def train_data_loader(list_file, num_segments, duration, image_size,dataset_name
     return train_data, collate_fn_ignore_none
 
 
-def test_data_loader(list_file, num_segments, duration, image_size,bounding_box_face,bounding_box_body, root_dir, data_percentage: float = 1.0, binary_classification: bool = False):
+def test_data_loader(list_file, num_segments, duration, image_size,bounding_box_face,bounding_box_body, root_dir, data_percentage: float = 1.0, binary_classification: bool = False, emotional_only: bool = False):
     
     test_transform = torchvision.transforms.Compose([GroupResize(image_size),
                                                      Stack(),
@@ -323,6 +323,7 @@ def test_data_loader(list_file, num_segments, duration, image_size,bounding_box_
                              bounding_box_body=bounding_box_body,
                              root_dir=root_dir,
                              data_percentage=data_percentage,
-                             binary_classification=binary_classification
+                             binary_classification=binary_classification,
+                             emotional_only=emotional_only
                              )
     return test_data, collate_fn_ignore_none
