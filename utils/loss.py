@@ -126,6 +126,13 @@ class CLIPCAERLoss(nn.Module):
             self.lambda_cons = 0.0
             self.lambda_binary = 1.0 # Only the binary loss is active
             self.binary_loss = nn.BCEWithLogitsLoss()
+            
+            # --- HOTFIX for AttributeError ---
+            # Initialize all attributes to avoid errors in set_epoch, even though they are not used.
+            self.mi_warmup = 0
+            self.mi_ramp   = 0
+            self.dc_warmup = 0
+            self.dc_ramp   = 0
         else:
             # base lambdas (max weight)
             self.lambda_mi = float(getattr(args, "lambda_mi", 1.0))
