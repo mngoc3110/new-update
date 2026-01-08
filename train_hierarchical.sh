@@ -22,7 +22,7 @@ echo "Starting Hierarchical Training with EAA and IEC"
 python main.py \
   --mode train \
   --exper-name "${EXP}" \
-  --gpu mps \
+  --gpu 0 \
   --seed 42 \
   --workers 4 \
   --print-freq 10 \
