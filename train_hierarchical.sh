@@ -13,11 +13,11 @@ ANNOT_DIR="${ROOT_DIR}/RAER/annotation"
 BOX_DIR="${ROOT_DIR}/RAER/bounding_box"
 
 # Experiment Name: Hierarchical (Binary Head) + EAA + IEC
-EXP="Hierarchical_ViTB32_EAA_IEC_30Epochs"
+EXP="Hierarchical_ViTB32_EAA_IEC_100Epochs" # Updated experiment name
 OUT="outputs/${EXP}-$(date +%m-%d-%H%M)"
 mkdir -p "${OUT}"
 
-echo "Starting Hierarchical Training with EAA and IEC"
+echo "Starting Hierarchical Training with EAA and IEC (100 Epochs)" # Updated echo
 
 python main.py \
   --mode train \
@@ -46,14 +46,14 @@ python main.py \
   --use-adapter True \
   --use-iec True \
   \
-  --epochs 30 \
+  --epochs 100 \
   --batch-size 16 \
   \
   --lr 1e-3 \
   --lr-image-encoder 1e-6 \
   --lr-prompt-learner 5e-4 \
   --lr-adapter 1e-3 \
-  --milestones 20 25 \
+  --milestones 60 80 \
   --gamma 0.1 \
   \
   --lambda-mi 0.5 --mi-warmup 5 \
@@ -68,11 +68,11 @@ python main.py \
   --focal-gamma 2.0 \
   --unfreeze-visual-last-layer False \
   \
-  --stage1-epochs 5 \
+  --stage1-epochs 10 \
   --stage1-label-smoothing 0.1 \
   --stage1-smoothing-temp 0.15 \
   \
-  --stage2-epochs 25 \
+  --stage2-epochs 80 \
   --stage2-logit-adjust-tau 0.2 \
   --stage2-max-class-weight 1.5 \
   --stage2-smoothing-temp 0.15 \
