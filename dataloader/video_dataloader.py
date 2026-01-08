@@ -134,7 +134,7 @@ class VideoDataset(data.Dataset):
             
             # Remap labels from [2,3,4,5] to [0,1,2,3]
             for record in self.video_list:
-                record._data[2] = str(int(record._data[2]) - 2)
+                record._data[2] = str(int(record._data[2]) - 1)
         
         print(('video number:%d' % (len(self.video_list))))
 
@@ -280,7 +280,7 @@ def collate_fn_ignore_none(batch):
         return torch.tensor([]) # Return empty tensor to signal empty batch
     return torch.utils.data.dataloader.default_collate(batch)
 
-def train_data_loader(list_file, num_segments, duration, image_size,dataset_name,bounding_box_face,bounding_box_body, root_dir, data_percentage: float = 1.0, binary_classification: bool = False):
+def train_data_loader(list_file, num_segments, duration, image_size,dataset_name,bounding_box_face,bounding_box_body, root_dir, data_percentage: float = 1.0, binary_classification: bool = False, emotional_only: bool = False):
     if dataset_name == "RAER":
          # Reverted to Baseline-style Gentle Augmentation to preserve features and Aspect Ratio
          train_transforms = torchvision.transforms.Compose([
@@ -301,7 +301,8 @@ def train_data_loader(list_file, num_segments, duration, image_size,dataset_name
                               bounding_box_body=bounding_box_body,
                               root_dir=root_dir,
                               data_percentage=data_percentage,
-                              binary_classification=binary_classification
+                              binary_classification=binary_classification,
+                              emotional_only=emotional_only
                               )
     return train_data, collate_fn_ignore_none
 
