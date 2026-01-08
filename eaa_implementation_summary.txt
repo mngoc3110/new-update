@@ -1,0 +1,14 @@
+Tóm tắt các thay đổi để triển khai Expression-aware Adapter (EAA):
+
+1.  **Tạo tệp `models/adapter.py`:**
+    *   Định nghĩa một module `Adapter` mới.
+    *   Đây là một mạng nơ-ron nhỏ (MLP 2 lớp) để học cách "tinh chỉnh" các đặc trưng hình ảnh.
+
+2.  **Cập nhật `models/Generate_Model.py`:**
+    *   Thêm một tùy chọn mới là `use_adapter` để có thể bật/tắt chức năng này.
+    *   Trong mô hình `GenerateModel`, một module `Adapter` được khởi tạo.
+    *   Trong hàm `forward`, sau khi trích xuất đặc trưng từ bộ mã hóa hình ảnh của CLIP, các đặc trưng này sẽ được đưa qua `Adapter`.
+    *   Kết quả đầu ra của `Adapter` được cộng vào đặc trưng ban đầu (kết nối phần dư - residual connection) để tinh chỉnh chúng.
+    *   Quá trình này được áp dụng cho cả đặc trưng của mặt (face) và thân (body).
+
+Đây là phiên bản triển khai đơn giản hóa của EAA để thử nghiệm ý tưởng một cách an toàn và hiệu quả.

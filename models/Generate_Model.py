@@ -6,6 +6,8 @@ from clip import clip
 import torch
 import torch.nn.functional as F
 from models.Text import get_hierarchical_prompts # Import helper
+from models.adapter import Adapter # Import Adapter
+from utils.utils import slerp # Import slerp
 
 class CrossAttention(nn.Module):
     def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
@@ -46,6 +48,9 @@ class GenerateModel(nn.Module):
         super().__init__()
         self.args = args
         self.use_hierarchical_prompt = str(getattr(args, 'use_hierarchical_prompt', 'False')) == 'True'
+        self.use_adapter = str(getattr(args, 'use_adapter', 'False')) == 'True'
+        self.use_iec = str(getattr(args, 'use_iec', 'False')) == 'True'
+
 
         # --- Prompts ---
         self.prompt_learner = PromptLearner(input_text, clip_model, args)
@@ -71,15 +76,6 @@ class GenerateModel(nn.Module):
             self.register_buffer("tokenized_prompts_l2", self.tokenized_l2)
             self.register_buffer("tokenized_prompts_l3", self.tokenized_l3)
             
-            # Pre-compute fixed embeddings for these levels (since they are hand-crafted/frozen for now)
-            # Or if you want to make them learnable, you'd need multiple PromptLearners.
-            # For "Lite" version, we keep them fixed or use the main learnable prompt for L3 and fixed for L1/L2.
-            # To keep it simple and consistent with "Hand-crafted branch": We treat these as auxiliary fixed prompts 
-            # that ensemble with the main learnable branch.
-            
-            # Actually, to maximize impact, let's pre-compute their embeddings (frozen) 
-            # and ensemble them into the 'hand_crafted' branch OR add them to the main logits.
-            # Let's ensemble them into the main decision process.
             with torch.no_grad():
                 self.embed_l1 = clip_model.token_embedding(self.tokenized_l1).type(clip_model.dtype)
                 self.embed_l2 = clip_model.token_embedding(self.tokenized_l2).type(clip_model.dtype)
@@ -89,10 +85,19 @@ class GenerateModel(nn.Module):
             self.register_buffer("fixed_embed_l2", self.embed_l2)
             self.register_buffer("fixed_embed_l3", self.embed_l3)
 
-
         # --- Encoders ---
         self.text_encoder = TextEncoder(clip_model)
         self.image_encoder = clip_model.visual
+
+        # --- Adapter ---
+        if self.use_adapter:
+            print("   [Model] Using Expression-aware Adapter (EAA)...")
+            self.adapter = Adapter(c_in=512, reduction=4)
+
+        # --- IEC ---
+        if self.use_iec:
+            print("   [Model] Using Instance-enhanced Expression Classifier (IEC)...")
+            self.slerp_t = nn.Parameter(torch.tensor(0.5)) # Learnable interpolation factor
 
         # --- Hand-crafted token embedding (frozen) ---
         with torch.no_grad():
@@ -157,6 +162,11 @@ class GenerateModel(nn.Module):
         n, t, c, h, w = image_face.shape
         image_face = image_face.contiguous().view(-1, c, h, w)
         face_feat = self.image_encoder(image_face.type(self.dtype))
+
+        if self.use_adapter:
+            adapter_out = self.adapter(face_feat)
+            face_feat = face_feat + adapter_out
+
         face_feat = face_feat.contiguous().view(n, t, -1)
         video_face_features = self.temporal_net(face_feat) # [B, 512]
 
@@ -164,6 +174,11 @@ class GenerateModel(nn.Module):
         n, t, c, h, w = image_body.shape
         image_body = image_body.contiguous().view(-1, c, h, w)
         body_feat = self.image_encoder(image_body.type(self.dtype))
+
+        if self.use_adapter:
+            adapter_out = self.adapter(body_feat)
+            body_feat = body_feat + adapter_out
+
         body_feat = body_feat.contiguous().view(n, t, -1)
         video_body_features = self.temporal_net_body(body_feat) # [B, 512]
 
@@ -221,8 +236,32 @@ class GenerateModel(nn.Module):
         if self.tau and self.tau > 0:
             scale = torch.tensor(1.0 / self.tau, device=video_features.device, dtype=video_features.dtype)
 
-        # Main Logits (Learnable)
-        logits_learnable = scale * (video_features @ learnable_text_features.t())
+        # --- IEC Logic ---
+        if self.use_iec:
+            # Interpolate video features with each text feature
+            # video_features: [B, D]
+            # learnable_text_features: [C, D]
+            # We want to create [B, C, D] instance-aware text features
+            
+            # Unsqueeze video_features to [B, 1, D] and text_features to [1, C, D]
+            video_features_unsqueezed = video_features.unsqueeze(1)
+            text_features_unsqueezed = learnable_text_features.unsqueeze(0)
+            
+            # Create instance-aware text features
+            instance_aware_text_features = slerp(
+                text_features_unsqueezed,
+                video_features_unsqueezed,
+                self.slerp_t
+            ) # Resulting shape: [B, C, D]
+            
+            # Calculate logits
+            # We want to compute cosine similarity between each video feature and its corresponding set of instance-aware text features
+            # (video_features_unsqueezed * instance_aware_text_features).sum(dim=-1)
+            logits_learnable = scale * (video_features_unsqueezed * instance_aware_text_features).sum(dim=-1)
+
+        else:
+            # Original logic
+            logits_learnable = scale * (video_features @ learnable_text_features.t())
         
         # --- Lite-HiCroPL Ensemble ---
         if self.use_hierarchical_prompt:

@@ -169,6 +169,11 @@ def computer_uar_war(
     model.eval()
     all_preds, all_targets = [], []
 
+    # ---- Open log file for binary probs ----
+    bin_prob_log_file = None
+    if split_name in ["TEST", "VALID"]:
+        bin_prob_log_file = open("binary_probs.log", "a", encoding="utf-8")
+
     start = time.time()
     for images_face, images_body, target in loader:
         images_face = images_face.to(device, non_blocking=True)
@@ -185,18 +190,24 @@ def computer_uar_war(
             logits = _unwrap_logits(out)
             logits_binary = None
 
-        preds_main = torch.argmax(logits, dim=1)
-
         # Hierarchical Inference Logic
         if inference_threshold_binary > 0 and logits_binary is not None:
             probs_binary = torch.softmax(logits_binary, dim=1)
             # Probability of being Non-Neutral (Class 1)
             prob_non_neutral = probs_binary[:, 1]
             
+            # ---- Log binary probs ----
+            if bin_prob_log_file is not None:
+                for i in range(len(prob_non_neutral)):
+                    is_neutral_true = 1 if target[i].item() == 0 else 0
+                    bin_prob_log_file.write(f"{prob_non_neutral[i].item():.4f},{is_neutral_true}\n")
+
             # If prob(non-neutral) < threshold -> Force Neutral (0)
+            # Otherwise, predict among the emotional classes (1 to 4)
+            emotional_preds = torch.argmax(logits[:, 1:], dim=1) + 1
             preds = torch.where(
-                prob_non_neutral >= inference_threshold_binary, 
-                preds_main, 
+                prob_non_neutral >= inference_threshold_binary,
+                emotional_preds,
                 torch.tensor(0, device=device)
             )
         # Fallback to old logic if no binary head but threshold is set (less likely now but safe)
@@ -211,6 +222,10 @@ def computer_uar_war(
             
         all_preds.append(preds.detach().cpu())
         all_targets.append(target.detach().cpu())
+
+    # ---- Close log file ----
+    if bin_prob_log_file is not None:
+        bin_prob_log_file.close()
 
     all_preds = torch.cat(all_preds).numpy()
     all_targets = torch.cat(all_targets).numpy()
@@ -260,3 +275,31 @@ def computer_uar_war(
 # =========================
 def get_lr(optimizer):
     return [pg["lr"] for pg in optimizer.param_groups]
+
+def slerp(v0, v1, t, DOT_THRESHOLD=0.9995):
+    """
+    Spherical Linear Interpolation (SLERP)
+    v0, v1: Tensors to interpolate between
+    t: Interpolation factor (scalar or tensor)
+    """
+    # Normalize vectors
+    v0 = v0 / (v0.norm(dim=-1, keepdim=True) + 1e-6)
+    v1 = v1 / (v1.norm(dim=-1, keepdim=True) + 1e-6)
+
+    # Dot product
+    dot = (v0 * v1).sum(dim=-1)
+
+    # If the vectors are too close, use linear interpolation
+    if (torch.abs(dot) > DOT_THRESHOLD).any():
+        res = (1 - t) * v0 + t * v1
+        return res / (res.norm(dim=-1, keepdim=True) + 1e-6)
+
+    # SLERP formula
+    theta = torch.acos(dot)
+    sin_theta = torch.sin(theta)
+    
+    a = torch.sin((1 - t) * theta) / sin_theta
+    b = torch.sin(t * theta) / sin_theta
+    
+    res = a.unsqueeze(-1) * v0 + b.unsqueeze(-1) * v1
+    return res

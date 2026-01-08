@@ -1,0 +1,14 @@
+Tóm tắt các thay đổi để triển khai Instance-enhanced Expression Classifier (IEC):
+
+1.  **Cập nhật `utils/utils.py`:**
+    *   Thêm một hàm mới là `slerp` (Spherical Linear Interpolation) để thực hiện phép nội suy trên không gian hình cầu giữa các vector đặc trưng.
+
+2.  **Cập nhật `models/Generate_Model.py`:**
+    *   Thêm một tùy chọn mới là `use_iec` để có thể bật/tắt chức năng này.
+    *   Thêm một tham số có thể học được là `slerp_t` để điều khiển mức độ nội suy.
+    *   Trong hàm `forward`, nếu `use_iec` được bật:
+        *   Thay vì tính toán logits trực tiếp, mô hình sẽ sử dụng `slerp` để tạo ra một bộ 'đặc trưng văn bản nhận biết mẫu' (instance-aware text features) mới.
+        *   Bộ đặc trưng mới này là sự kết hợp (nội suy) giữa đặc trưng video của từng mẫu và đặc trưng văn bản của từng lớp.
+        *   Logits sau đó được tính toán dựa trên sự tương đồng cosine giữa đặc trưng video và bộ đặc trưng văn bản đã được 'cá nhân hóa' theo từng mẫu này.
+
+Đây là cách để hiện thực hóa ý tưởng 'lọc neutral mềm' mà bạn đã đề cập, giúp bộ phân loại trở nên linh hoạt hơn với từng mẫu dữ liệu.

@@ -74,6 +74,7 @@ optim_group = parser.add_argument_group('Optimizer & LR', 'Hyperparameters for t
 optim_group.add_argument('--lr', type=float, default=1e-2, help='Initial learning rate for main modules.')
 optim_group.add_argument('--lr-image-encoder', type=float, default=1e-5, help='Learning rate for the image encoder part.')
 optim_group.add_argument('--lr-prompt-learner', type=float, default=1e-3, help='Learning rate for the prompt learner.')
+optim_group.add_argument('--lr-adapter', type=float, default=1e-3, help='Learning rate for the adapter modules.')
 optim_group.add_argument('--weight-decay', type=float, default=1e-4, help='Weight decay for the optimizer.')
 optim_group.add_argument('--momentum', type=float, default=0.9, help='Momentum for the SGD optimizer.')
 optim_group.add_argument('--milestones', nargs='+', type=int, default=[10, 15], help='Epochs at which to decay the learning rate.')
@@ -93,6 +94,8 @@ model_group.add_argument('--image-size', type=int, default=224, help='Size to re
 model_group.add_argument('--unfreeze-visual-last-layer', type=str, default='False', choices=['True', 'False'], help='Unfreeze the last layer of the visual encoder for fine-tuning.')
 model_group.add_argument('--use-multi-scale', type=str, default='False', choices=['True', 'False'], help='Use multi-scale input (Face + Body/Global) for better feature extraction.')
 model_group.add_argument('--use-hierarchical-prompt', type=str, default='False', choices=['True', 'False'], help='Enable Lite-HiCroPL 3-level prompt ensemble.')
+model_group.add_argument('--use-adapter', type=str, default='False', choices=['True', 'False'], help='Enable Expression-aware Adapter (EAA).')
+model_group.add_argument('--use-iec', type=str, default='False', choices=['True', 'False'], help='Enable Instance-enhanced Expression Classifier (IEC).')
 
 # --- Loss & Regularization ---
 loss_group = parser.add_argument_group('Loss & Regularization', 'Hyperparameters for loss functions and regularization')
@@ -244,7 +247,7 @@ def run_training(args: argparse.Namespace) -> None:
     # Load checkpoint if resuming training
     if args.resume:
         if os.path.isfile(args.resume):
-            print(f"=> Loading checkpoint '{args.resume}'")
+            print(f="=> Loading checkpoint '{args.resume}'")
             checkpoint = torch.load(args.resume, map_location=args.device, weights_only=False) # ADDED weights_only=False
             start_epoch = checkpoint['epoch']
             best_uar = checkpoint['best_acc'] # Assuming best_acc stores UAR
@@ -253,9 +256,9 @@ def run_training(args: argparse.Namespace) -> None:
             # Load recorder state (optional, if you want to continue plot/history)
             if 'recorder' in checkpoint:
                 recorder = checkpoint['recorder']
-            print(f"=> Loaded checkpoint '{args.resume}' (epoch {checkpoint['epoch']})")
+            print(f="=> Loaded checkpoint '{args.resume}' (epoch {checkpoint['epoch']})")
         else:
-            print(f"=> No checkpoint found at '{args.resume}', starting from scratch.")
+            print(f="=> No checkpoint found at '{args.resume}', starting from scratch.")
             
     # --- STAGE 1 SETUP (Safe Base Learning) ---
     print("=> INITIALIZING STAGE 1: Warm-up (Epoch 0 - {})".format(args.stage1_epochs))
@@ -305,7 +308,7 @@ def run_training(args: argparse.Namespace) -> None:
     if args.resume and os.path.isfile(args.resume):
         checkpoint = torch.load(args.resume, map_location=args.device, weights_only=False) # ADDED weights_only=False
         model.load_state_dict(checkpoint['state_dict'])
-        print(f"=> Model state loaded from '{args.resume}'")
+        print(f="=> Model state loaded from '{args.resume}'")
 
     print("=> Model built and moved to device successfully.")
 
@@ -317,20 +320,28 @@ def run_training(args: argparse.Namespace) -> None:
     original_lambda_mi = 0.5 # Default hardcoded in .sh if not passed, assuming we want to ramp to 0.5
     original_lambda_dc = 0.5
 
-    optimizer = torch.optim.SGD([
+    params_to_optimize = [
         {"params": model.temporal_net.parameters(), "lr": args.lr},
         {"params": model.temporal_net_body.parameters(), "lr": args.lr},
         {"params": model.image_encoder.parameters(), "lr": args.lr_image_encoder},
         {"params": model.prompt_learner.parameters(), "lr": args.lr_prompt_learner},
         {"params": model.project_fc.parameters(), "lr": args.lr_image_encoder},
-        {"params": model.binary_head.parameters(), "lr": args.lr} # ✅ Added binary head to optimizer
-    ], momentum=args.momentum, weight_decay=args.weight_decay)
+        {"params": model.binary_head.parameters(), "lr": args.lr}
+    ]
+
+    if model.use_adapter:
+        params_to_optimize.append({"params": model.adapter.parameters(), "lr": args.lr_adapter})
+
+    if model.use_iec:
+        params_to_optimize.append({"params": [model.slerp_t], "lr": args.lr})
+
+    optimizer = torch.optim.SGD(params_to_optimize, momentum=args.momentum, weight_decay=args.weight_decay)
 
     # Load optimizer state from checkpoint if resuming
     if args.resume and os.path.isfile(args.resume):
         checkpoint = torch.load(args.resume, map_location=args.device, weights_only=False) # ADDED weights_only=False
         optimizer.load_state_dict(checkpoint['optimizer'])
-        print(f"=> Optimizer state loaded from '{args.resume}'")
+        print(f="=> Optimizer state loaded from '{args.resume}'")
 
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=args.gamma)
     
@@ -339,7 +350,7 @@ def run_training(args: argparse.Namespace) -> None:
         checkpoint = torch.load(args.resume, map_location=args.device, weights_only=False) # ADDED weights_only=False
         if 'scheduler' in checkpoint: # Scheduler might not always be saved
             scheduler.load_state_dict(checkpoint['scheduler'])
-            print(f"=> Scheduler state loaded from '{args.resume}'")
+            print(f="=> Scheduler state loaded from '{args.resume}'")
 
     # Trainer
     trainer = Trainer(
@@ -360,7 +371,7 @@ def run_training(args: argparse.Namespace) -> None:
 
     # --- RESUME LOGIC: Set correct stage parameters based on start_epoch ---
     if not use_baseline and start_epoch > 0:
-        print(f"=> Resuming at Epoch {start_epoch}. Setting correct Stage parameters...")
+        print(f="=> Resuming at Epoch {start_epoch}. Setting correct Stage parameters...")
         
         # Check which stage we are in and apply ALL settings for that stage immediately
         
@@ -371,23 +382,6 @@ def run_training(args: argparse.Namespace) -> None:
             args.stage2_max_class_weight = args.stage4_max_class_weight
             train_loader, val_loader, test_loader_final = build_dataloaders(args, use_weighted_sampler=True)
             criterion.logit_adjust_tau = args.logit_adjust_tau
-            # Weights OFF/Reduced? Original code doesn't explicitly turn weights OFF in Stage 4, 
-            # but implied "Reducing WeightedRandomSampler". 
-            # Looking at original logic: Stage 4 just updates tau and max_class_weight for sampler.
-            # It DOES NOT seem to calculate new class_weights for the Loss function itself in the original transition code?
-            # Wait, Stage 3 transition calculated weights. Stage 4 transition just printed "Weights: Still OFF" (which was a comment in my thought, but let's check code).
-            # In original code:
-            # Stage 4 block:
-            #   args.stage2_max_class_weight = args.stage4_max_class_weight
-            #   build_dataloaders(..., use_weighted_sampler=True)
-            #   criterion.logit_adjust_tau = ...
-            #   (No criterion.class_weights update).
-            # So it inherits Stage 3's weights? No, "Weights: Still OFF" comment suggests something else.
-            # Let's look at Stage 3 block in original code:
-            #   args.class_weights = calculate_weights(...)
-            #   criterion.class_weights = ...
-            # So Stage 3 has weights. Stage 4 inherits them unless reset.
-            # However, to be safe and match the "Transition" logic exactly, we should apply what the transition applies.
             
         # STAGE 3 CONFIG
         elif start_epoch >= args.stage2_epochs:

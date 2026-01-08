@@ -3,32 +3,26 @@
 set -e
 
 # --- SETUP ENVIRONMENT (Kaggle/Colab) ---
-echo "=> Installing dependencies..."
+ echo "=> Installing dependencies..."
 pip install git+https://github.com/openai/CLIP.git
 pip install imbalanced-learn
 
 # --- PATH CONFIGURATION ---
-# Kaggle Paths (Default)
-ROOT_DIR="/kaggle/input/raer-video-emotion-dataset"
-ANNOT_DIR="/kaggle/input/raer-annot/annotation"
+ROOT_DIR="/Users/macbook/Downloads/week15/new-update 2/"
+ANNOT_DIR="${ROOT_DIR}/RAER/annotation"
 BOX_DIR="${ROOT_DIR}/RAER/bounding_box"
 
-# Local Paths (Commented out)
-# ROOT_DIR="./"
-# ANNOT_DIR="RAER/annotation"
-# BOX_DIR="RAER/bounding_box"
-
-# Experiment Name: Hierarchical (Binary Head) + LiteHiCroPL + 4-Stage
-EXP="Hierarchical_ViTB32_LiteHiCroPL_4Stage_BalancedPush_100Epochs"
+# Experiment Name: Hierarchical (Binary Head) + EAA + IEC
+EXP="Hierarchical_ViTB32_EAA_IEC_30Epochs"
 OUT="outputs/${EXP}-$(date +%m-%d-%H%M)"
 mkdir -p "${OUT}"
 
-echo "Starting Hierarchical Training: Neutral vs Non-Neutral + 5-Class Classification"
+echo "Starting Hierarchical Training with EAA and IEC"
 
 python main.py \
   --mode train \
   --exper-name "${EXP}" \
-  --gpu 0 \
+  --gpu mps \
   --seed 42 \
   --workers 4 \
   --print-freq 10 \
@@ -49,20 +43,23 @@ python main.py \
   --contexts-number 16 \
   \
   --use-hierarchical-prompt True \
+  --use-adapter True \
+  --use-iec True \
   \
-  --epochs 100 \
-  --batch-size 16 \
+  --epochs 30 \
+  --batch-size 8 \
   \
   --lr 1e-3 \
   --lr-image-encoder 1e-6 \
   --lr-prompt-learner 5e-4 \
-  --milestones 70 90 \
+  --lr-adapter 1e-3 \
+  --milestones 20 25 \
   --gamma 0.1 \
   \
   --lambda-mi 0.5 --mi-warmup 5 \
   --lambda-dc 0.5 --dc-warmup 5 \
   --lambda-cons 0.1 \
-  --lambda-binary 1.0 \
+  --lambda-binary 2.0 \
   --distraction-boost 1.5 \
   \
   --use-lsr2-loss True \
@@ -71,21 +68,14 @@ python main.py \
   --focal-gamma 2.0 \
   --unfreeze-visual-last-layer False \
   \
-  --stage1-epochs 3 \
-  --stage1-label-smoothing 0.05 \
+  --stage1-epochs 5 \
+  --stage1-label-smoothing 0.1 \
   --stage1-smoothing-temp 0.15 \
   \
-  --stage2-epochs 30 \
+  --stage2-epochs 25 \
   --stage2-logit-adjust-tau 0.2 \
   --stage2-max-class-weight 1.5 \
   --stage2-smoothing-temp 0.15 \
-  --stage2-label-smoothing 0.1 \
-  \
-  --stage3-epochs 70 \
-  --stage3-logit-adjust-tau 0.5 \
-  --stage3-max-class-weight 3.0 \
-  --stage3-smoothing-temp 0.18 \
-  --stage4-logit-adjust-tau 0.1 \
-  --stage4-max-class-weight 1.2
+  --stage2-label-smoothing 0.1
 
 # Note: Batch size 8 for MPS stability. Increase to 16/32 if on strong GPU.
