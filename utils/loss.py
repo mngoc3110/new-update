@@ -120,12 +120,15 @@ class CLIPCAERLoss(nn.Module):
 
         if self.binary_classification_stage:
             print("   [Loss] Initializing for STAGE 1: Binary Classification Only.")
-            self.ce_loss = nn.BCEWithLogitsLoss()
+            # For binary_classification_stage, ce_loss will be used for the 2-class problem.
+            # So, it should be CrossEntropyLoss with 2 classes.
+            self.ce_loss = nn.CrossEntropyLoss() 
             self.lambda_mi = 0.0
             self.lambda_dc = 0.0
             self.lambda_cons = 0.0
             self.lambda_binary = 1.0 # Only the binary loss is active
-            self.binary_loss = nn.BCEWithLogitsLoss()
+            # Use CrossEntropyLoss for binary_head outputting 2 logits
+            self.binary_loss = nn.CrossEntropyLoss()
             
             # --- HOTFIX for AttributeError ---
             # Initialize all attributes to avoid errors in set_epoch, even though they are not used.
@@ -353,9 +356,9 @@ class CLIPCAERLoss(nn.Module):
 
         if self.binary_classification_stage:
             # Stage 1: Binary Classification
-            targets_binary = (targets > 0).float() # 0 for Neutral, 1 for Non-Neutral
-            # We use logits_binary here, not logits
-            binary_loss = self.binary_loss(logits_binary.squeeze(), targets_binary)
+            targets_binary = (targets > 0).long() # 0 for Neutral, 1 for Non-Neutral. Use .long() for CrossEntropyLoss
+            # We use logits_binary here, not logits. Logits are [B, 2], targets are [B]
+            binary_loss = self.binary_loss(logits_binary, targets_binary)
             return { "total": binary_loss, "ce": binary_loss, "mi": 0, "dc": 0, "cons": 0, "binary": binary_loss, "w_mi": 0, "w_dc": 0 }
 
         targets = self._sanitize_targets(targets)
