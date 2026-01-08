@@ -8,7 +8,7 @@ pip install git+https://github.com/openai/CLIP.git
 pip install imbalanced-learn
 
 # --- PATH CONFIGURATION ---
-ROOT_DIR="/Users/macbook/Downloads/week15/new-update 2/"
+ROOT_DIR="/content/drive/MyDrive/khoaluan/Dataset/"
 ANNOT_DIR="${ROOT_DIR}/RAER/annotation"
 BOX_DIR="${ROOT_DIR}/RAER/bounding_box"
 
