@@ -1,0 +1,57 @@
+# Tóm tắt Quá trình Phát triển Dự án và các Thử nghiệm
+
+Đây là bản tóm tắt các giai đoạn phát triển, các vấn đề gặp phải, và các chiến lược đã được áp dụng cho dự án.
+
+---
+
+### 1. Trạng thái ban đầu: Chiến lược Huấn luyện 4 Giai đoạn
+
+- **Ý tưởng:** Huấn luyện mô hình qua 4 giai đoạn khác nhau để xử lý vấn đề mất cân bằng dữ liệu nghiêm trọng trong tập dữ liệu RAER. Mỗi giai đoạn có một bộ siêu tham số riêng (learning rate, trọng số lớp, kỹ thuật làm mượt, v.v.) để từ từ "hướng" mô hình đến việc nhận dạng tốt hơn các lớp thiểu số.
+- **Mục tiêu:** Cải thiện chỉ số UAR (Unweighted Average Recall), một thước đo quan trọng cho các bài toán mất cân bằng.
+
+---
+
+### 2. Thử nghiệm: Mở rộng Giai đoạn 3 (Stage 3 Extended)
+
+- **Mô tả:** Một thử nghiệm đã được thực hiện bằng cách kéo dài Giai đoạn 3, giai đoạn được cho là có tính "tấn công" mạnh nhất vào việc cải thiện UAR.
+- **Kết quả:** (Không có trong lịch sử hội thoại, nhưng đây là một bước đã được thực hiện trong dự án).
+
+---
+
+### 3. Giới thiệu Phần đầu Nhị phân (Binary Head)
+
+- **Ý tưởng:** Thêm một "phần đầu" phân loại nhị phân vào mô hình để nó học cách phân biệt "Trung tính" (lớp đa số) và "Cảm xúc" (tất cả các lớp còn lại) trước. Sau đó, nếu là "Cảm xúc", một bộ phân loại khác sẽ quyết định đó là cảm xúc gì.
+- **Vấn đề gặp phải:**
+    - **Hiệu suất không ổn định:** Phần đầu nhị phân không được hiệu chỉnh tốt. Nó có xu hướng đưa ra các xác suất trong một phạm vi rất hẹp.
+    - **"Tất cả hoặc không có gì":** Khi đặt ngưỡng (threshold) là 0.5, mô hình dự đoán tất cả là "Cảm xúc". Khi tăng ngưỡng lên 0.54 hoặc 0.6, nó lại dự đoán tất cả là "Trung tính".
+- **Quá trình gỡ lỗi:**
+    - **Sửa lỗi logic:** Sửa lại logic trong `utils/utils.py` để đảm bảo khi phần đầu nhị phân dự đoán "Cảm xúc", bộ phân loại chính chỉ chọn từ các lớp cảm xúc.
+    - **Thử nghiệm ngưỡng:** Chạy đánh giá với các ngưỡng khác nhau (0.5, 0.54, 0.6) để tìm điểm tối ưu, nhưng không thành công do sự hiệu chỉnh kém của mô hình.
+
+---
+
+### 4. Các Thử nghiệm Huấn luyện lại
+
+#### Thử nghiệm 1: Tăng `lambda_binary` và Đơn giản hóa Loss
+
+- **Chiến lược:**
+    - Tăng `lambda_binary` từ 1.0 lên 2.0 để "phạt" nặng hơn các lỗi phân loại nhị phân.
+    - Tạm thời tắt các kỹ thuật loss phức tạp (`LSR2`, `semantic-smoothing`) để cô lập vấn đề.
+- **Kết quả:**
+    - **Tích cực:** Mô hình bắt đầu học cách phân biệt các lớp cảm xúc khác nhau trên tập kiểm định, UAR tăng từ 20% lên ~41%.
+    - **Tiêu cực:** Mô hình "lệch" sang một thái cực khác: nó hoàn toàn bỏ qua lớp "Trung tính" và không bao giờ dự đoán nó.
+
+#### Thử nghiệm 2 (Hiện tại): Kết hợp ý tưởng từ bài báo EA-CLIP
+
+- **Chiến lược:**
+    1.  **Thêm Adapter (EAA):** Triển khai một module adapter nhẹ sau bộ mã hóa hình ảnh để giúp mô hình học các đặc trưng cảm xúc tinh tế hơn.
+    2.  **Thêm Classifier nâng cao (IEC):** Sử dụng phép nội suy SLERP để tạo ra một bộ phân loại "nhận biết mẫu", giúp giảm sự áp đảo của lớp "Trung tính".
+    3.  **Giữ lại các chiến lược tốt:** Vẫn giữ `lambda_binary = 2.0` và bật lại các kỹ thuật smoothing theo yêu cầu.
+- **Mục tiêu:** Kết hợp những điểm mạnh của kiến trúc mới (EAA, IEC) với các chiến lược đã cho thấy hiệu quả (tăng `lambda_binary`, xử lý mất cân bằng) để tạo ra một mô hình cân bằng và mạnh mẽ hơn.
+
+---
+
+### 5. Tình trạng Hiện tại và Bước tiếp theo
+
+- **Tình trạng:** Đã triển khai mã nguồn cho EAA và IEC. Đã cập nhật các tệp `main.py`, `train_hierarchical.sh` và các tệp liên quan để sẵn sàng cho một đợt huấn luyện mới.
+- **Bước tiếp theo:** Chạy tệp `train_hierarchical.sh` để bắt đầu quá trình huấn luyện thử nghiệm (30 epochs) với kiến trúc và chiến lược mới nhất.
