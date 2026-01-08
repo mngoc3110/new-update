@@ -133,15 +133,13 @@ class CLIPCAERLoss(nn.Module):
         super().__init__()
         self.num_classes = int(num_classes)
         self.mi_estimator = mi_estimator
+        self.args = args
 
         # base lambdas (max weight)
         self.lambda_mi = float(getattr(args, "lambda_mi", 1.0))
         self.lambda_dc = float(getattr(args, "lambda_dc", 0.0))
-        self.lambda_cons = float(getattr(args, "lambda_cons", 0.0)) # New Consistency Loss weight
-        self.lambda_binary = float(getattr(args, "lambda_binary", 0.3)) # Default 0.3 as per suggestion
-        
-        # Binary Classification Stage Flag
-        self.binary_classification_stage = (str(getattr(args, "binary_classification_stage", "False")) == "True")
+        self.lambda_cons = float(getattr(args, "lambda_cons", 0.0))
+        self.lambda_binary = float(getattr(args, "lambda_binary", 0.3))
         
         # warmup/ramp
         self.mi_warmup = int(getattr(args, "mi_warmup", 0))
@@ -149,42 +147,19 @@ class CLIPCAERLoss(nn.Module):
         self.dc_warmup = int(getattr(args, "dc_warmup", 0))
         self.dc_ramp   = int(getattr(args, "dc_ramp", 0))
 
-        # label smoothing
-        self.label_smoothing = float(getattr(args, "label_smoothing", 0.0))
-        self.semantic_smoothing = (str(getattr(args, "semantic_smoothing", "False")) == "True")
-        self.smoothing_temp = float(getattr(args, "smoothing_temp", 0.1))
-
         # Logit Adjustment (Menon et al., 2020)
-        self.logit_adjust_tau = float(getattr(args, "logit_adjust_tau", 0.0))
         self.register_buffer("class_priors", None)
         if hasattr(args, "class_counts") and args.class_counts is not None:
             counts = torch.tensor(args.class_counts, dtype=torch.float32)
             priors = counts / counts.sum()
             self.register_buffer("class_priors", priors)
-
-        # Class weights for the MAIN 5-class loss
+        
+        # Base class weights for the MAIN 5-class loss
         cw = getattr(args, "class_weights", None)
         if cw is not None:
             cw = torch.tensor(cw, dtype=torch.float32)
-        self.register_buffer("class_weights", cw if cw is not None else None)
-        
-        # Focal Loss
-        self.use_focal_loss = (str(getattr(args, "use_focal_loss", "False")) == "True")
-        self.focal_gamma = float(getattr(args, "focal_gamma", 2.0))
-        
-        # Main Loss (CE or Focal)
-        if self.use_focal_loss:
-            self.ce_loss = FocalLoss(
-                gamma=self.focal_gamma,
-                alpha=self.class_weights,
-                label_smoothing=self.label_smoothing
-            )
-        else:
-            self.ce_loss = nn.CrossEntropyLoss(
-                weight=self.class_weights,
-                label_smoothing=self.label_smoothing,
-            )
-        
+        self.register_buffer("base_class_weights", cw)
+
         # Loss for the Binary Head
         self.binary_loss = nn.CrossEntropyLoss()
 
@@ -202,81 +177,113 @@ class CLIPCAERLoss(nn.Module):
         self.last_w_mi = w_mi
         self.last_w_dc = w_dc
 
+    def _get_stage_params(self, epoch):
+        """Determine current stage and return its parameters."""
+        stage1_end = self.args.stage1_epochs
+        stage2_end = stage1_end + self.args.stage2_epochs
+        stage3_end = stage2_end + self.args.stage3_epochs
+
+        if epoch < stage1_end:
+            stage = 1
+            params = {
+                "max_class_weight": -1, # No clipping
+                "logit_adjust_tau": 0.0,
+                "use_focal_loss": False,
+                "label_smoothing": self.args.stage1_label_smoothing,
+                "semantic_smoothing": True,
+                "smoothing_temp": self.args.stage1_smoothing_temp,
+            }
+        elif epoch < stage2_end:
+            stage = 2
+            params = {
+                "max_class_weight": self.args.stage2_max_class_weight,
+                "logit_adjust_tau": self.args.stage2_logit_adjust_tau,
+                "use_focal_loss": True,
+                "focal_gamma": self.args.focal_gamma,
+                "label_smoothing": self.args.stage2_label_smoothing,
+                "semantic_smoothing": True,
+                "smoothing_temp": self.args.stage2_smoothing_temp,
+            }
+        elif epoch < stage3_end:
+            stage = 3
+            params = {
+                "max_class_weight": self.args.stage3_max_class_weight,
+                "logit_adjust_tau": self.args.stage3_logit_adjust_tau,
+                "use_focal_loss": True,
+                "focal_gamma": self.args.focal_gamma,
+                "label_smoothing": self.args.label_smoothing,
+                "semantic_smoothing": self.args.semantic_smoothing,
+                "smoothing_temp": self.args.stage3_smoothing_temp,
+            }
+        else:
+            stage = 4
+            params = {
+                "max_class_weight": self.args.stage4_max_class_weight,
+                "logit_adjust_tau": self.args.stage4_logit_adjust_tau,
+                "use_focal_loss": getattr(self.args, 'stage4_use_focal_loss', 'True') == 'True',
+                "focal_gamma": getattr(self.args, 'stage4_focal_gamma', self.args.focal_gamma),
+                "label_smoothing": self.args.label_smoothing,
+                "semantic_smoothing": getattr(self.args, 'stage4_semantic_smoothing', 'True') == 'True',
+                "smoothing_temp": getattr(self.args, 'stage4_smoothing_temp', self.args.smoothing_temp),
+            }
+        
+        # Special handling for Neutral in logit adjustment
+        params["logit_adjust_tau_neutral"] = getattr(self.args, f'stage{stage}_logit_adjust_tau_neutral', params["logit_adjust_tau"])
+        
+        # Get class weights for the current stage
+        current_weights = self.base_class_weights.clone() if self.base_class_weights is not None else None
+        if current_weights is not None and params["max_class_weight"] > 0:
+            current_weights = torch.clamp(current_weights, max=params["max_class_weight"])
+        
+        # Neutral-preserving weight adjustment for Stage 4
+        if stage == 4 and hasattr(self.args, 'stage4_neutral_weight') and self.args.stage4_neutral_weight > 0 and current_weights is not None:
+            current_weights[0] = self.args.stage4_neutral_weight
+        
+        params["class_weights"] = current_weights
+        
+        return params
+
+
     def _sanitize_targets(self, targets):
         if targets.dim() > 1:
             targets = targets.view(-1)
         return targets.long().clamp(0, self.num_classes - 1)
 
     def _mi_loss(self, f_l, f_h):
-        if (
-            f_l is None
-            or f_h is None
-            or self.mi_estimator is None
-            or self.last_w_mi == 0.0
-        ):
-            if isinstance(f_l, torch.Tensor):
-                return f_l.new_tensor(0.0)
-            if isinstance(f_h, torch.Tensor):
-                return f_h.new_tensor(0.0)
-            return torch.tensor(0.0)
-
-        f_l = f_l.float()
-        f_h = f_h.float()
-
-        pos = self.mi_estimator(f_l, f_h).mean()
-        idx = torch.randperm(f_h.size(0), device=f_h.device)
-        neg = self.mi_estimator(f_l, f_h[idx]).mean()
-
+        if (f_l is None or f_h is None or self.mi_estimator is None or self.last_w_mi == 0.0):
+            return torch.tensor(0.0, device=f_l.device if isinstance(f_l, torch.Tensor) else 'cpu')
+        pos = self.mi_estimator(f_l.float(), f_h.float()).mean()
+        neg = self.mi_estimator(f_l.float(), f_h.float()[torch.randperm(f_h.size(0))]).mean()
         return -(pos - neg)
 
     def _dc_loss(self, logits_l, logits_h, eps=1e-8):
         if logits_l is None or logits_h is None or self.last_w_dc == 0.0:
-            if isinstance(logits_l, torch.Tensor):
-                return logits_l.new_tensor(0.0)
-            if isinstance(logits_h, torch.Tensor):
-                return logits_h.new_tensor(0.0)
-            return torch.tensor(0.0)
-
+            return torch.tensor(0.0, device=logits_l.device if isinstance(logits_l, torch.Tensor) else 'cpu')
         p_l = F.softmax(logits_l.float(), dim=1)
         p_h = F.softmax(logits_h.float(), dim=1)
-
-        P = torch.einsum("bi,bj->ij", p_l, p_h)
+        P = (p_l.unsqueeze(2) * p_h.unsqueeze(1)).sum(0)
         P = P / (P.sum() + eps)
-
-        P_l = P.sum(dim=1, keepdim=True)
-        P_h = P.sum(dim=0, keepdim=True)
-
-        P   = P.clamp_min(eps)
-        P_l = P_l.clamp_min(eps)
-        P_h = P_h.clamp_min(eps)
-
+        P_l = P.sum(dim=1, keepdim=True).clamp_min(eps)
+        P_h = P.sum(dim=0, keepdim=True).clamp_min(eps)
+        P = P.clamp_min(eps)
         dc = (P * (torch.log(P) - torch.log(P_l) - torch.log(P_h))).sum()
         return dc
     
     def _consistency_loss(self, logits_learnable, logits_frozen, T=1.0):
         if logits_frozen is None or self.lambda_cons == 0.0:
             return torch.tensor(0.0, device=logits_learnable.device)
-        
         p_frozen = F.softmax(logits_frozen / T, dim=1)
         log_p_learnable = F.log_softmax(logits_learnable / T, dim=1)
-        
         loss = F.kl_div(log_p_learnable, p_frozen, reduction='batchmean') * (T**2)
         return loss
 
-    def _compute_semantic_target(self, targets, hand_crafted_text_features):
+    def _compute_semantic_target(self, targets, hand_crafted_text_features, smoothing_temp, label_smoothing):
         if self.prior_distribution is None or self.prior_distribution.device != hand_crafted_text_features.device:
             sim_matrix = hand_crafted_text_features @ hand_crafted_text_features.t()
-            self.prior_distribution = F.softmax(sim_matrix / self.smoothing_temp, dim=1)
-
+            self.prior_distribution = F.softmax(sim_matrix / smoothing_temp, dim=1)
         batch_prior = self.prior_distribution[targets]
-        
-        batch_size = targets.size(0)
-        one_hot = torch.zeros(batch_size, self.num_classes, device=targets.device)
-        one_hot.scatter_(1, targets.unsqueeze(1), 1)
-        
-        alpha = self.label_smoothing
-        soft_targets = (1.0 - alpha) * one_hot + alpha * batch_prior
-        
+        one_hot = F.one_hot(targets, self.num_classes).float()
+        soft_targets = (1.0 - label_smoothing) * one_hot + label_smoothing * batch_prior
         return soft_targets
 
     def forward(
@@ -284,75 +291,65 @@ class CLIPCAERLoss(nn.Module):
         logits,
         targets,
         *,
-        epoch: int = None,
+        epoch: int = 0, # Default to 0 for inference
         learnable_text_features=None,
         hand_crafted_text_features=None,
         logits_hand=None,
         logits_binary=None,
+        is_train=True,
     ):
-        if epoch is not None:
+        if is_train and epoch is not None:
             self.set_epoch(int(epoch))
+        
+        # Get stage-specific parameters
+        stage_params = self._get_stage_params(epoch if is_train else self.args.epochs) # Use last stage for eval
+        
+        # Apply logit adjustment
+        if self.class_priors is not None and stage_params["logit_adjust_tau"] > 0:
+            tau = torch.full((self.num_classes,), stage_params["logit_adjust_tau"], device=logits.device)
+            tau[0] = stage_params["logit_adjust_tau_neutral"] # Special tau for Neutral (class 0)
+            logits = logits - tau * torch.log(self.class_priors + 1e-9)
+
+        # Apply post-hoc inference bias
+        if not is_train and hasattr(self.args, 'inference_neutral_bias') and self.args.inference_neutral_bias != 0.0:
+            logits[:, 0] += self.args.inference_neutral_bias
 
         targets_main = self._sanitize_targets(targets)
         
-        logits = torch.clamp(logits, min=-30.0, max=30.0)
-        if logits_hand is not None:
-            logits_hand = torch.clamp(logits_hand, min=-30.0, max=30.0)
-        
-        binary_loss_component = torch.tensor(0.0, device=logits.device)
-        if logits_binary is not None and (self.lambda_binary > 0 or self.binary_classification_stage):
-            targets_binary = (targets > 0).long()
-            binary_loss_component = self.binary_loss(logits_binary, targets_binary) * self.lambda_binary
-
-        # --- Check for Binary Classification Stage ---
-        if self.binary_classification_stage:
-            # In Stage 1, we ONLY optimize the binary loss.
-            return {
-                "total": binary_loss_component,
-                "ce": torch.tensor(0.0, device=logits.device),
-                "mi": torch.tensor(0.0, device=logits.device),
-                "dc": torch.tensor(0.0, device=logits.device),
-                "cons": torch.tensor(0.0, device=logits.device),
-                "binary": binary_loss_component,
-                "w_mi": 0.0,
-                "w_dc": 0.0,
-            }
-
-        cons_loss = self._consistency_loss(logits, logits_hand) * self.lambda_cons
-        
         # --- Main 5-class loss ---
-        if self.semantic_smoothing and self.label_smoothing > 0.0 and hand_crafted_text_features is not None:
-            # Semantic Smoothing Path
-            if hand_crafted_text_features.dtype != torch.float32:
-                hand_crafted_text_features = hand_crafted_text_features.float()
-            
-            soft_targets = self._compute_semantic_target(targets_main, hand_crafted_text_features)
+        current_weights = stage_params["class_weights"]
+        if stage_params["semantic_smoothing"] and stage_params["label_smoothing"] > 0.0 and hand_crafted_text_features is not None:
+            soft_targets = self._compute_semantic_target(targets_main, hand_crafted_text_features.float(), stage_params["smoothing_temp"], stage_params["label_smoothing"])
             log_probs = F.log_softmax(logits, dim=1)
-            
             per_sample_loss = -torch.sum(soft_targets * log_probs, dim=1)
-            if self.class_weights is not None:
-                sample_weights = self.class_weights[targets_main]
+            if current_weights is not None:
+                sample_weights = current_weights.to(targets_main.device)[targets_main]
                 ce_main_loss = (per_sample_loss * sample_weights).mean()
             else:
                 ce_main_loss = per_sample_loss.mean()
         else:
-            # Standard Path (CE or Focal)
-            ce_main_loss = self.ce_loss(logits, targets_main)
+            if stage_params["use_focal_loss"]:
+                loss_func = FocalLoss(gamma=stage_params["focal_gamma"], alpha=current_weights, label_smoothing=stage_params["label_smoothing"])
+            else:
+                loss_func = nn.CrossEntropyLoss(weight=current_weights.to(logits.device) if current_weights is not None else None, label_smoothing=stage_params["label_smoothing"])
+            ce_main_loss = loss_func(logits, targets_main)
 
+        # --- Other loss components ---
         mi = self._mi_loss(learnable_text_features, hand_crafted_text_features)
         dc = self._dc_loss(logits, logits_hand)
+        cons_loss = self._consistency_loss(logits, logits_hand)
+        
+        binary_loss_component = torch.tensor(0.0, device=logits.device)
+        if logits_binary is not None and self.lambda_binary > 0:
+            targets_binary = (targets > 0).long()
+            binary_loss_component = self.binary_loss(logits_binary, targets_binary)
 
-        total = ce_main_loss + self.last_w_mi * mi + self.last_w_dc * dc + cons_loss + binary_loss_component
+        total = ce_main_loss + self.last_w_mi * mi + self.last_w_dc * dc + self.lambda_cons * cons_loss + self.lambda_binary * binary_loss_component
 
         return {
-            "total": total,
-            "ce": ce_main_loss,
-            "mi": mi,
-            "dc": dc,
-            "cons": cons_loss,
-            "binary": binary_loss_component,
-            "w_mi": float(self.last_w_mi),
-            "w_dc": float(self.last_w_dc),
+            "total": total, "ce": ce_main_loss, "mi": mi, "dc": dc,
+            "cons": cons_loss, "binary": binary_loss_component,
+            "w_mi": float(self.last_w_mi), "w_dc": float(self.last_w_dc),
         }
 
 

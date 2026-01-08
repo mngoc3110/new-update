@@ -84,7 +84,8 @@ class Trainer:
                         learnable_text_features=(out.get("learnable_text_features") if isinstance(out, dict) else None),
                         hand_crafted_text_features=(out.get("hand_crafted_text_features") if isinstance(out, dict) else None),
                         logits_hand=(out.get("logits_hand") if isinstance(out, dict) else None),
-                        logits_binary=logits_binary # Pass to criterion for Hierarchical Loss
+                        logits_binary=logits_binary, # Pass to criterion for Hierarchical Loss
+                        is_train=is_train
                     )
                     loss = loss_dict["total"]
 
