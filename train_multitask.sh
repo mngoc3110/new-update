@@ -52,7 +52,7 @@ python main.py \
   --use-iec False \
   \
   --epochs 40 \
-  --batch-size 8 \
+  --batch-size 16 \
   \
   --lr 5e-5 \
   --lr-image-encoder 1e-5 \
