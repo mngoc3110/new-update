@@ -94,17 +94,21 @@ def get_class_info(args: argparse.Namespace) -> Tuple[list, list]:
 
 
 def build_dataloaders(args: argparse.Namespace, use_weighted_sampler: bool = False, binary_classification: bool = False, emotional_only: bool = False) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader, torch.utils.data.DataLoader]: 
-    train_annotation_file_path = os.path.join(args.root_dir, args.train_annotation)
+    # Helper to determine if a path is absolute or relative to root_dir
+    def get_full_path(base_path, relative_path):
+        if relative_path and relative_path.startswith('/'): # If it's an absolute path
+            return relative_path
+        elif relative_path: # If it's a relative path, join with base_path
+            return os.path.join(base_path, relative_path)
+        return None # Return None if relative_path is None or empty
+
+
+    train_annotation_file_path = get_full_path(args.root_dir, args.train_annotation)
+    val_annotation_file_path = get_full_path(args.root_dir, args.val_annotation)
+    test_annotation_file_path = get_full_path(args.root_dir, args.test_annotation)
     
-    val_annotation_file_path = None
-    if args.val_annotation:
-        val_annotation_file_path = os.path.join(args.root_dir, args.val_annotation)
-    
-    test_annotation_file_path = os.path.join(args.root_dir, args.test_annotation)
-    
-    # Correctly join root_dir with bounding box paths
-    bounding_box_face_path = os.path.join(args.root_dir, args.bounding_box_face)
-    bounding_box_body_path = os.path.join(args.root_dir, args.bounding_box_body)
+    bounding_box_face_path = get_full_path(args.root_dir, args.bounding_box_face)
+    bounding_box_body_path = get_full_path(args.root_dir, args.bounding_box_body)
 
     print("Loading train data...")
     train_data, train_collate_fn = train_data_loader(

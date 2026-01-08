@@ -16,7 +16,7 @@ echo "Starting STAGE 1: Binary Classification (Neutral vs. Non-Neutral)"
 
 # --- PATH CONFIGURATION ---
 ROOT_DIR="/kaggle/input/raer-video-emotion-dataset"
-ANNOT_DIR="${ROOT_DIR}/RAER/annotation"
+ANNOT_DIR="/kaggle/input/raer-annot/annotation"
 TRAIN_TXT="${ANNOT_DIR}/train_80.txt"
 VAL_TXT="${ANNOT_DIR}/val_20.txt"
 TEST_TXT="${ANNOT_DIR}/test.txt"
