@@ -26,7 +26,6 @@ python main.py \
   --seed 42 \
   --workers 4 \
   --print-freq 50 \
-  --resume "outputs/Kaggle_ViTB32_LiteHiCroPL_4Stage_SmartPush_100Epochs-[01-05]-[01:04]/model.pth" \
   \
   --root-dir "${ROOT_DIR}" \
   --train-annotation "${ANNOT_DIR}/train_80.txt" \
