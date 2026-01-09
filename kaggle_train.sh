@@ -26,6 +26,7 @@ python main.py \
   --seed 42 \
   --workers 4 \
   --print-freq 50 \
+  --resume "/kaggle/input/stage3-extend/Kaggle_ViTB32_LiteHiCroPL_4Stage_SmartPush_100Epochs-Resumed-STAGE3_EXTENDED/model_best.pth" \
   \
   --root-dir "${ROOT_DIR}" \
   --train-annotation "${ANNOT_DIR}/train_80.txt" \
