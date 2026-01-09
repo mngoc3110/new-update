@@ -270,15 +270,20 @@ def run_training(args: argparse.Namespace) -> None:
             start_epoch = checkpoint['epoch']
             best_uar = checkpoint['best_acc']
             model.load_state_dict(checkpoint['state_dict'], strict=False)
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            if 'scheduler' in checkpoint:
-                scheduler.load_state_dict(checkpoint['scheduler'])
-            if 'recorder' in checkpoint:
-                recorder = checkpoint['recorder']
-            print(f"=> Loaded checkpoint '{args.resume}' (epoch {start_epoch})")
+            try:
+                optimizer.load_state_dict(checkpoint['optimizer'])
+                if 'scheduler' in checkpoint:
+                    scheduler.load_state_dict(checkpoint['scheduler'])
+                if 'recorder' in checkpoint:
+                    recorder = checkpoint['recorder']
+                print(f"=> Loaded checkpoint '{args.resume}' (epoch {start_epoch}) with optimizer")
+            except ValueError:
+                print(f"=> Loaded model weights from checkpoint '{args.resume}' (epoch {start_epoch}).")
+                print("=> Could not load optimizer state, starting with a fresh optimizer.")
+
         else:
             print(f"=> No checkpoint found at '{args.resume}', starting from scratch.")
-
+    
     # --- Loss and Trainer ---
     criterion = build_criterion(args, mi_estimator=model.mi_estimator, num_classes=len(class_names)).to(args.device)
     
@@ -394,3 +399,4 @@ if __name__ == '__main__':
         run_eval(args)
     else:
         run_training(args)
+
