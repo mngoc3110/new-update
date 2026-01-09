@@ -26,7 +26,6 @@ python main.py \
   --seed 42 \
   --workers 4 \
   --print-freq 50 \
-  --resume "outputs/Kaggle_ViTB32_LiteHiCroPL_4Stage_SmartPush_100Epochs-[01-05]-[01:04]/model.pth" \
   \
   --root-dir "${ROOT_DIR}" \
   --train-annotation "${ANNOT_DIR}/train_80.txt" \
@@ -90,6 +89,6 @@ python main.py \
   --stage4-max-class-weight 2.0 \
   --stage4-use-focal-loss False \
   --stage4-semantic-smoothing False \
-  --inference-neutral-bias 0.5
+  --inference-neutral-bias 0.0
 
 # Note: Batch size 16 is a good starting point for Kaggle GPUs.

@@ -277,7 +277,7 @@ def run_training(args: argparse.Namespace) -> None:
                 recorder = checkpoint['recorder']
             print(f="=> Loaded checkpoint '{args.resume}' (epoch {start_epoch})")
         else:
-            print(f"=> No checkpoint found at '{args.resume}', starting from scratch.")
+            print(f="=> No checkpoint found at '{args.resume}', starting from scratch.")
     
     # --- Loss and Trainer ---
     criterion = build_criterion(args, mi_estimator=model.mi_estimator, num_classes=len(class_names)).to(args.device)
