@@ -81,12 +81,13 @@ python main.py \
   \
   --stage3-epochs 90 \
   --stage3-logit-adjust-tau 0.8 \
-  --stage3-logit-adjust-tau-neutral 0.1 \
+  --stage3-logit-adjust-tau-neutral 0.0 \
   --stage3-max-class-weight 5.0 \
   --stage3-smoothing-temp 0.18 \
   \
   --stage4-logit-adjust-tau 0.1 \
   --stage4-max-class-weight 2.0 \
+  --stage4-neutral-weight 1.5 \
   --stage4-use-focal-loss False \
   --stage4-semantic-smoothing False \
   --inference-neutral-bias 0.0
