@@ -265,7 +265,7 @@ def run_training(args: argparse.Namespace) -> None:
     # --- Resume Logic ---
     if args.resume:
         if os.path.isfile(args.resume):
-            print(f="=> Loading checkpoint '{args.resume}'")
+            print(f"=> Loading checkpoint '{args.resume}'")
             checkpoint = torch.load(args.resume, map_location=args.device, weights_only=False)
             start_epoch = checkpoint['epoch']
             best_uar = checkpoint['best_acc']
@@ -275,10 +275,10 @@ def run_training(args: argparse.Namespace) -> None:
                 scheduler.load_state_dict(checkpoint['scheduler'])
             if 'recorder' in checkpoint:
                 recorder = checkpoint['recorder']
-            print(f="=> Loaded checkpoint '{args.resume}' (epoch {start_epoch})")
+            print(f"=> Loaded checkpoint '{args.resume}' (epoch {start_epoch})")
         else:
-            print(f="=> No checkpoint found at '{args.resume}', starting from scratch.")
-    
+            print(f"=> No checkpoint found at '{args.resume}', starting from scratch.")
+
     # --- Loss and Trainer ---
     criterion = build_criterion(args, mi_estimator=model.mi_estimator, num_classes=len(class_names)).to(args.device)
     
